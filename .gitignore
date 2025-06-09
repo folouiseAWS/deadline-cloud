@@ -30,3 +30,5 @@ installer/components
 
 # Install builder license
 license.xml
+memory-bank
+.clinerules
