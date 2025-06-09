@@ -78,6 +78,72 @@ api.list_farms()
 # {'farms': [{'farmId': 'farm-1234567890abcdefg', 'displayName': 'my-first-farm', ...},]}
 ```
 
+## MCP Server Integration
+
+The AWS Deadline Cloud client includes a Model Context Protocol (MCP) server that provides LLM tools (like Claude, Cline, etc.) with direct access to AWS Deadline Cloud operations. This enables AI assistants to interact with your farms, queues, jobs, and other Deadline Cloud resources.
+
+### Prerequisites
+
+Before using the MCP server, you need to install the AWS Deadline Cloud client:
+
+```sh
+$ pip install deadline
+```
+
+For MCP functionality with optional dependencies:
+
+```sh
+$ pip install "deadline[mcp]"
+```
+
+### Starting the MCP Server
+
+The MCP server is included with the deadline client and can be started using:
+
+```sh
+$ deadline-mcp
+```
+
+This starts the MCP server on stdio transport, making it available for integration with MCP-compatible tools.
+
+### Configuring LLM Tools
+
+#### Cline (VSCode Extension)
+
+To configure Cline to use the Deadline Cloud MCP server:
+
+1. Open VSCode Settings
+2. Search for "Cline MCP"
+3. Add a new MCP server configuration:
+   ```json
+   {
+     "command": "deadline-mcp",
+     "args": [],
+     "name": "deadline-server"
+   }
+   ```
+
+Alternatively, you can add this to your Cline MCP settings file:
+
+```json
+{
+  "mcpServers": {
+    "deadline-server": {
+      "command": "deadline-mcp",
+      "args": []
+    }
+  }
+}
+```
+### Troubleshooting
+
+If you encounter issues with the MCP server:
+
+1. **Check AWS credentials**: Run `deadline auth status` to verify authentication
+2. **Test the client**: Run `deadline farm list` to ensure basic functionality works
+3. **Check logs**: The MCP server logs to stderr, which may be captured by your LLM tool
+4. **Verify installation**: Ensure you have the latest version with `pip install --upgrade deadline[mcp]`
+
 ## Job-related Files
 For job-related files and data, AWS Deadline Cloud supports either transferring files to AWS using job attachments or reading files from network storage that is shared between both your local workstation and your farm.
 
