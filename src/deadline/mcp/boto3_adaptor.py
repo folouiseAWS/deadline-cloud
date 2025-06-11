@@ -298,35 +298,26 @@ def categorize_api(operation_name: str) -> str:
     return "tool"
 
 
-def extract_parameter_schema(
-    operation_model_or_client, operation_name: str = None
-) -> Dict[str, Any]:
+def extract_parameter_schema(client, operation_name: str) -> Dict[str, Any]:
     """
     Extract JSON schema for parameters from a boto3 operation.
 
     Args:
-        operation_model_or_client: Either a boto3 client or an operation model
-        operation_name: The name of the operation (required if first arg is client)
+        client: The boto3 client
+        operation_name: The name of the operation
 
     Returns:
         Dict[str, Any]: JSON schema describing the operation parameters
     """
     try:
-        # Handle both signatures for backward compatibility with tests
-        if hasattr(operation_model_or_client, "_service_model"):
-            # This is a client, get the operation model
-            client = operation_model_or_client
-            if not operation_name:
-                return {"type": "object", "properties": {}}
+        if not hasattr(client, "_service_model"):
+            return {"type": "object", "properties": {}}
 
-            service_model = client._service_model
-            if not hasattr(service_model, "operation_model"):
-                return {"type": "object", "properties": {}}
+        service_model = client._service_model
+        if not hasattr(service_model, "operation_model"):
+            return {"type": "object", "properties": {}}
 
-            operation_model = service_model.operation_model(operation_name)
-        else:
-            # This is already an operation model (test usage)
-            operation_model = operation_model_or_client
+        operation_model = service_model.operation_model(operation_name)
 
         if (
             not operation_model

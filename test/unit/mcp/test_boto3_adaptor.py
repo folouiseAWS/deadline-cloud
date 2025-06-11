@@ -264,6 +264,12 @@ class TestExtractParameterSchema:
             "displayName": Mock(type_name="string", documentation="Display name"),
             "description": Mock(type_name="string", documentation="Optional description"),
         }
+        mock_operation_model.input_shape.required_members = ["farmId", "displayName"]
+
+        # Create mock client that returns our mock operation model
+        mock_client = Mock()
+        mock_client._service_model = Mock()
+        mock_client._service_model.operation_model.return_value = mock_operation_model
 
         expected_schema = {
             "type": "object",
@@ -278,7 +284,7 @@ class TestExtractParameterSchema:
         # Act & Assert
         from deadline.mcp.boto3_adaptor import extract_parameter_schema
 
-        result = extract_parameter_schema(mock_operation_model)
+        result = extract_parameter_schema(mock_client, "TestOperation")
         assert result["type"] == expected_schema["type"]
         assert "properties" in result
         assert "farmId" in result["properties"]
@@ -290,10 +296,15 @@ class TestExtractParameterSchema:
         mock_operation_model = Mock(spec=OperationModel)
         mock_operation_model.input_shape = None
 
+        # Create mock client that returns our mock operation model
+        mock_client = Mock()
+        mock_client._service_model = Mock()
+        mock_client._service_model.operation_model.return_value = mock_operation_model
+
         # Act & Assert
         from deadline.mcp.boto3_adaptor import extract_parameter_schema
 
-        result = extract_parameter_schema(mock_operation_model)
+        result = extract_parameter_schema(mock_client, "TestOperation")
         assert result == {"type": "object", "properties": {}}
 
     def test_extract_parameter_schema_handles_complex_types(self):
@@ -315,11 +326,17 @@ class TestExtractParameterSchema:
             "tags": Mock(type_name="list", member=Mock(type_name="structure")),
             "configuration": mock_nested_shape,
         }
+        mock_operation_model.input_shape.required_members = []
+
+        # Create mock client that returns our mock operation model
+        mock_client = Mock()
+        mock_client._service_model = Mock()
+        mock_client._service_model.operation_model.return_value = mock_operation_model
 
         # Act & Assert
         from deadline.mcp.boto3_adaptor import extract_parameter_schema
 
-        result = extract_parameter_schema(mock_operation_model)
+        result = extract_parameter_schema(mock_client, "TestOperation")
         assert result["type"] == "object"
         assert "properties" in result
         assert "farmId" in result["properties"]
