@@ -300,16 +300,3 @@ class DynamicParameterExtractor:
             Dict[str, Any]: Normalized parameters
         """
         return self.validator.normalize_parameter_values(parameters)
-
-    # Convenience methods for name conversion using NameConverter
-    def to_snake_case(self, name: str) -> str:
-        """Convert PascalCase/camelCase to snake_case."""
-        return NameConverter.to_snake_case(name)
-
-    def to_kebab_case(self, name: str) -> str:
-        """Convert PascalCase to kebab-case."""
-        return NameConverter.to_kebab_case(name)
-
-    def to_camel_case(self, snake_name: str) -> str:
-        """Convert snake_case to camelCase."""
-        return NameConverter.to_camel_case(snake_name)

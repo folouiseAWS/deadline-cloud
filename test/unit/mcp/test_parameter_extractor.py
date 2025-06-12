@@ -392,10 +392,18 @@ class TestDynamicParameterExtractor:
         assert normalized == expected
 
     def test_name_conversion_methods(self):
-        """Test convenience name conversion methods."""
-        assert self.extractor.to_snake_case("farmId") == "farm_id"
-        assert self.extractor.to_kebab_case("QueueFleetAssociations") == "queue-fleet-associations"
-        assert self.extractor.to_camel_case("farm_id") == "farmId"
+        """Test that name conversion uses NameConverter directly (delegation methods removed)."""
+        from deadline.mcp.utils import NameConverter
+
+        # Delegation methods were removed per simplification - use NameConverter directly
+        assert NameConverter.to_snake_case("farmId") == "farm_id"
+        assert NameConverter.to_kebab_case("QueueFleetAssociations") == "queue-fleet-associations"
+        assert NameConverter.to_camel_case("farm_id") == "farmId"
+
+        # Verify delegation methods no longer exist
+        assert not hasattr(self.extractor, "to_snake_case")
+        assert not hasattr(self.extractor, "to_kebab_case")
+        assert not hasattr(self.extractor, "to_camel_case")
 
     def test_component_initialization(self):
         """Test that all components are properly initialized."""

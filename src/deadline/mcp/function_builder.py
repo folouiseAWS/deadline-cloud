@@ -181,6 +181,45 @@ class FunctionSignatureBuilder:
 class FunctionWrapperBuilder:
     """Creates function wrappers with proper error handling and execution logic."""
 
+    def _convert_parameters(
+        self, bound_args: inspect.BoundArguments, param_mapping: Dict[str, str]
+    ) -> Dict[str, Any]:
+        """Convert bound arguments to API kwargs."""
+        api_kwargs = {}
+        for param_name, value in bound_args.arguments.items():
+            if value is not None and param_name in param_mapping:
+                original_name = param_mapping[param_name]
+                api_kwargs[original_name] = value
+        return api_kwargs
+
+    def _inject_principal_id(self, operation_name: str, api_kwargs: Dict[str, Any]) -> None:
+        """Auto-inject principalId for List operations (like client API does)."""
+        if (
+            operation_name.startswith(("List", "Search", "Query"))
+            and "principalId" not in api_kwargs
+        ):
+            try:
+                # Import here to avoid circular dependencies
+                from deadline.client.api._session import get_user_and_identity_store_id
+
+                user_id, _ = get_user_and_identity_store_id()
+                if user_id:
+                    api_kwargs["principalId"] = user_id
+            except (ImportError, Exception):
+                # If we can't get user ID, continue without it
+                # The API call may still work depending on permissions
+                pass
+
+    def _format_result(self, result: Any, operation_name: str) -> Dict[str, Any]:
+        """Format API result to ensure JSON-serializable response."""
+        if result is None:
+            return {"result": None, "operation": operation_name}
+        elif isinstance(result, dict):
+            return result
+        else:
+            # Convert non-dict results to dict format
+            return {"data": str(result), "operation": operation_name}
+
     def build_wrapper(
         self,
         operation_name: str,
@@ -207,74 +246,40 @@ class FunctionWrapperBuilder:
             """Safe wrapper that always returns valid JSON-serializable data."""
             try:
                 # Bind arguments to signature
-                try:
-                    bound_args = signature.bind(*args, **kwargs)
-                    bound_args.apply_defaults()
-                except TypeError as e:
-                    logger.warning(f"Parameter binding failed for {operation_name}: {str(e)}")
-                    return {
-                        "error": "Parameter binding failed",
-                        "operation": operation_name,
-                        "message": str(e),
-                    }
+                bound_args = signature.bind(*args, **kwargs)
+                bound_args.apply_defaults()
 
                 # Convert to API kwargs
-                api_kwargs = {}
-                for param_name, value in bound_args.arguments.items():
-                    if value is not None and param_name in param_mapping:
-                        original_name = param_mapping[param_name]
-                        api_kwargs[original_name] = value
+                api_kwargs = self._convert_parameters(bound_args, param_mapping)
 
                 # Auto-inject principalId for List operations (like client API does)
-                if (
-                    operation_name.startswith(("List", "Search", "Query"))
-                    and "principalId" not in api_kwargs
-                ):
-                    try:
-                        # Import here to avoid circular dependencies
-                        from deadline.client.api._session import get_user_and_identity_store_id
-
-                        user_id, _ = get_user_and_identity_store_id()
-                        if user_id:
-                            api_kwargs["principalId"] = user_id
-                    except (ImportError, Exception):
-                        # If we can't get user ID, continue without it
-                        # The API call may still work depending on permissions
-                        pass
+                self._inject_principal_id(operation_name, api_kwargs)
 
                 # Execute the operation
                 method_name = NameConverter.to_snake_case(operation_name)
-                try:
-                    method = getattr(client, method_name)
-                except AttributeError as e:
-                    logger.error(f"Method {method_name} not found for {operation_name}: {str(e)}")
-                    return {
-                        "error": "Method not found",
-                        "operation": operation_name,
-                        "method": method_name,
-                    }
+                method = getattr(client, method_name)
+                result = method(**api_kwargs)
 
-                try:
-                    result = method(**api_kwargs)
-                    # Ensure result is JSON-serializable
-                    if result is None:
-                        return {"result": None, "operation": operation_name}
-                    elif isinstance(result, dict):
-                        return result
-                    else:
-                        # Convert non-dict results to dict format
-                        return {"data": str(result), "operation": operation_name}
-                except Exception as e:
-                    logger.warning(f"API error in {operation_name}: {str(e)}")
-                    return {
-                        "error": "API call failed",
-                        "operation": operation_name,
-                        "message": str(e),
-                    }
+                # Format and return result
+                return self._format_result(result, operation_name)
 
+            except TypeError as e:
+                logger.warning(f"Parameter binding failed for {operation_name}: {str(e)}")
+                return {
+                    "error": "Parameter binding failed",
+                    "operation": operation_name,
+                    "message": str(e),
+                }
+            except AttributeError as e:
+                logger.error(f"Method {method_name} not found for {operation_name}: {str(e)}")
+                return {
+                    "error": "Method not found",
+                    "operation": operation_name,
+                    "method": method_name,
+                }
             except Exception as e:
-                logger.error(f"Unexpected error executing {operation_name}: {str(e)}")
-                return {"error": "Unexpected error", "operation": operation_name, "message": str(e)}
+                logger.warning(f"API error in {operation_name}: {str(e)}")
+                return {"error": "API call failed", "operation": operation_name, "message": str(e)}
 
         # Set function metadata
         func_type = "resource" if is_resource else "tool"
@@ -323,30 +328,25 @@ class MCPFunctionBuilder:
             operation_name, schema, is_resource
         )
 
-        # Step 2: Handle edge cases
+        # Step 2: Validate we have the necessary components
+        # Per .clinerules: no fallbacks allowed - fix root causes instead
         if not properties and is_resource:
-            # Check if this operation has URI parameters but no available properties
+            # Distinguish between broken resources vs valid global resources
             uri_pattern = ResourceURIMapper.get_uri_pattern_with_schema(operation_name, schema)
             uri_params = set(re.findall(r"\{(\w+)\}", uri_pattern))
 
             if uri_params:
-                logger.warning(
-                    f"Creating safe function for {operation_name} - "
-                    f"has URI params {uri_params} but no properties"
+                # Case B: Broken - has URI params but no properties to fill them
+                logger.error(
+                    f"Resource operation {operation_name} has URI params {uri_params} but no properties - "
+                    f"this indicates a parameter extraction issue that must be fixed"
                 )
-
-                async def safe_function(**kwargs) -> Dict[str, Any]:
-                    """Safe function that returns empty result for operations with no parameters."""
-                    logger.info(
-                        f"Operation {operation_name} called but has no available parameters"
-                    )
-                    return {"result": "No data available", "operation": operation_name}
-
-                safe_function.__name__ = f"{NameConverter.to_snake_case(operation_name)}_safe"
-                safe_function.__doc__ = (
-                    f"Safe function for {operation_name} (no parameters available)"
+                raise ValueError(
+                    f"Resource operation {operation_name} has URI params {uri_params} but no properties. "
+                    f"This violates MCP resource expectations and must be fixed at the source."
                 )
-                return safe_function
+            # Case A: Valid global resource - no URI params, no properties needed
+            # Continue with function creation
 
         # Step 3: Build function signature
         signature = self.signature_builder.build_signature(param_mapping, required)

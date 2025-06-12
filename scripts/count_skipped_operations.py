@@ -6,7 +6,8 @@ Script to count how many AWS Deadline Cloud operations are skipped during MCP se
 import logging
 import sys
 from io import StringIO
-from deadline.mcp.server import _initialize_client_and_apis
+from deadline.mcp.server import get_boto3_client, auto_register_mcp_operations
+from deadline.mcp.boto3_adaptor import discover_apis
 
 
 def count_skipped_operations():
@@ -23,8 +24,33 @@ def count_skipped_operations():
     logger.addHandler(log_handler)
 
     try:
-        # Initialize the server to trigger operation registration
-        _initialize_client_and_apis()
+        # Create a mock FastMCP server for registration testing
+        class MockFastMCP:
+            def __init__(self):
+                self.tools_count = 0
+                self.resources_count = 0
+
+            def tool(self, description=""):
+                def decorator(func):
+                    self.tools_count += 1
+                    return func
+
+                return decorator
+
+            def resource(self, pattern, description=""):
+                def decorator(func):
+                    self.resources_count += 1
+                    return func
+
+                return decorator
+
+        # Get client and discover operations
+        client = get_boto3_client()
+        operations = discover_apis(client)
+
+        # Create mock server and register operations
+        mock_server = MockFastMCP()
+        tools_count, resources_count = auto_register_mcp_operations(mock_server, client)
 
         # Get the log output
         log_output = log_capture.getvalue()
@@ -36,15 +62,12 @@ def count_skipped_operations():
 
         print(f"=== AWS Deadline Cloud MCP Server Operation Analysis ===\n")
 
-        # Import the global variables to get counts
-        from deadline.mcp.server import operations, tools, resources
-
         print(f"Total Operations Discovered: {len(operations)}")
-        print(f"Tools Registered: {len(tools)}")
-        print(f"Resources Registered: {len(resources)}")
+        print(f"Tools Registered: {tools_count}")
+        print(f"Resources Registered: {resources_count}")
         print(f"Operations Skipped: {len(skip_lines)}")
         print(
-            f"Registration Success Rate: {((len(tools) + len(resources)) / len(operations) * 100):.1f}%"
+            f"Registration Success Rate: {((tools_count + resources_count) / len(operations) * 100):.1f}%"
         )
 
         if skip_lines:
@@ -58,7 +81,7 @@ def count_skipped_operations():
                     print(f"{i}. {operation_part} (URI params: {params_part})")
 
         print(f"\n=== Summary ===")
-        print(f"✅ Successfully registered: {len(tools) + len(resources)} operations")
+        print(f"✅ Successfully registered: {tools_count + resources_count} operations")
         print(f"⚠️  Skipped due to schema issues: {len(skip_lines)} operations")
         print(f"📊 Total discovered: {len(operations)} operations")
 
@@ -66,6 +89,9 @@ def count_skipped_operations():
 
     except Exception as e:
         print(f"Error during analysis: {e}")
+        import traceback
+
+        traceback.print_exc()
         return -1
     finally:
         logger.removeHandler(log_handler)

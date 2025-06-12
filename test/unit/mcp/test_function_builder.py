@@ -8,7 +8,7 @@ _create_function_with_typed_params() function.
 import pytest
 import inspect
 from typing import Dict, Any
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock, AsyncMock, patch
 from deadline.mcp.function_builder import (
     ParameterProcessor,
     FunctionSignatureBuilder,
@@ -299,18 +299,40 @@ class TestMCPFunctionBuilder:
         assert "queue_id" in param_names
         assert "maxResults" not in param_names  # Should be excluded for resources
 
-    def test_edge_case_no_properties(self):
-        """Test handling of operations with no properties but URI parameters."""
+    def test_edge_case_no_properties_with_uri_params(self):
+        """Test handling of operations with URI params but no properties - should raise error."""
         mock_client = Mock()
         schema = {"properties": {}, "required": []}
 
-        # This should create a dummy function for resources with URI params but no properties
-        func = self.builder.build_function(
-            "GetWeirdResource", schema, mock_client, is_resource=True
-        )
+        # Mock ResourceURIMapper to return a pattern with URI params
+        with patch(
+            "deadline.mcp.function_builder.ResourceURIMapper.get_uri_pattern_with_schema"
+        ) as mock_uri:
+            mock_uri.return_value = "deadline://farm/{farm_id}/resource/{resource_id}"
 
-        # Function should exist but raise error when called
-        assert callable(func)
+            # Should raise error for operations with URI params but no properties
+            with pytest.raises(
+                ValueError,
+                match="Resource operation GetWeirdResource has URI params.*but no properties",
+            ):
+                self.builder.build_function(
+                    "GetWeirdResource", schema, mock_client, is_resource=True
+                )
+
+    def test_edge_case_global_resource_no_properties(self):
+        """Test handling of global operations with no properties - should be allowed."""
+        mock_client = Mock()
+        schema = {"properties": {}, "required": []}
+
+        # Mock ResourceURIMapper to return a pattern with no URI params (global resource)
+        with patch(
+            "deadline.mcp.function_builder.ResourceURIMapper.get_uri_pattern_with_schema"
+        ) as mock_uri:
+            mock_uri.return_value = "deadline://farms"  # No {param} placeholders
+
+            # Should NOT raise error for global operations with no properties
+            func = self.builder.build_function("ListFarms", schema, mock_client, is_resource=True)
+            assert callable(func)
 
     @pytest.mark.asyncio
     async def test_parameter_filtering_integration(self):
