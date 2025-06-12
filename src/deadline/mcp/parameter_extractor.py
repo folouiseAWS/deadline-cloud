@@ -9,6 +9,7 @@ parameter type mapping, and name normalization.
 import re
 from typing import Dict, Any, Set, List, Optional, Union, Tuple
 from botocore.model import OperationModel
+from deadline.mcp.utils import NameConverter
 
 
 class ParameterTypeConverter:
@@ -101,107 +102,32 @@ class ParameterTypeConverter:
             return {"type": "string"}
 
 
-class ParameterNameMapper:
-    """Handles parameter name conversions between different naming conventions."""
-
-    @staticmethod
-    def to_snake_case(name: str) -> str:
-        """Convert PascalCase/camelCase to snake_case.
-
-        Args:
-            name: PascalCase or camelCase string
-
-        Returns:
-            str: snake_case string
-        """
-        result = []
-        for i, char in enumerate(name):
-            if char.isupper() and i > 0:
-                result.append("_")
-            result.append(char.lower())
-        return "".join(result)
-
-    @staticmethod
-    def to_kebab_case(name: str) -> str:
-        """Convert PascalCase to kebab-case.
-
-        Args:
-            name: PascalCase string (e.g., 'QueueFleetAssociations')
-
-        Returns:
-            str: kebab-case string (e.g., 'queue-fleet-associations')
-        """
-        # Insert hyphens before capital letters (except the first one)
-        result = re.sub(r"(?<!^)(?=[A-Z])", "-", name)
-        return result.lower()
-
-    @staticmethod
-    def to_camel_case(snake_name: str) -> str:
-        """Convert snake_case to camelCase.
-
-        Args:
-            snake_name: snake_case string
-
-        Returns:
-            str: camelCase string
-        """
-        words = snake_name.split("_")
-        if len(words) == 1:
-            return words[0]
-        else:
-            return words[0] + "".join(word.capitalize() for word in words[1:])
-
-    def create_parameter_mapping(self, properties: Dict[str, Any]) -> Dict[str, str]:
-        """Create a mapping from snake_case to original parameter names.
-
-        Args:
-            properties: Dictionary of parameter properties
-
-        Returns:
-            Dict[str, str]: Mapping from snake_case names to original names
-        """
-        param_mapping = {}
-        for param_name in properties.keys():
-            snake_name = self.to_snake_case(param_name)
-            param_mapping[snake_name] = param_name
-        return param_mapping
-
-
 class ParameterSchemaExtractor:
     """Extracts parameter schemas from boto3 operations."""
 
     def __init__(self):
         self.type_converter = ParameterTypeConverter()
 
-    def extract_from_operation(
-        self, operation_model_or_client, operation_name: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def extract_from_operation(self, client, operation_name: str) -> Dict[str, Any]:
         """
         Extract JSON schema for parameters from a boto3 operation.
 
         Args:
-            operation_model_or_client: Either a boto3 client or an operation model
-            operation_name: The name of the operation (required if first arg is client)
+            client: boto3 client instance
+            operation_name: The name of the operation
 
         Returns:
             Dict[str, Any]: JSON schema describing the operation parameters
         """
         try:
-            # Handle both signatures for backward compatibility with tests
-            if hasattr(operation_model_or_client, "_service_model"):
-                # This is a client, get the operation model
-                client = operation_model_or_client
-                if not operation_name:
-                    return {"type": "object", "properties": {}}
+            if not hasattr(client, "_service_model"):
+                return {"type": "object", "properties": {}}
 
-                service_model = client._service_model
-                if not hasattr(service_model, "operation_model"):
-                    return {"type": "object", "properties": {}}
+            service_model = client._service_model
+            if not hasattr(service_model, "operation_model"):
+                return {"type": "object", "properties": {}}
 
-                operation_model = service_model.operation_model(operation_name)
-            else:
-                # This is already an operation model (test usage)
-                operation_model = operation_model_or_client
+            operation_model = service_model.operation_model(operation_name)
 
             if (
                 not operation_model
@@ -288,13 +214,10 @@ class DynamicParameterExtractor:
 
     def __init__(self):
         self.schema_extractor = ParameterSchemaExtractor()
-        self.name_mapper = ParameterNameMapper()
         self.validator = ParameterValidator()
         self.type_converter = ParameterTypeConverter()
 
-    def extract_parameter_schema(
-        self, operation_model_or_client, operation_name: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def extract_parameter_schema(self, client, operation_name: str) -> Dict[str, Any]:
         """
         Extract JSON schema for parameters from a boto3 operation.
 
@@ -302,15 +225,13 @@ class DynamicParameterExtractor:
         replacing the original extract_parameter_schema function.
 
         Args:
-            operation_model_or_client: Either a boto3 client or an operation model
-            operation_name: The name of the operation (required if first arg is client)
+            client: boto3 client instance
+            operation_name: The name of the operation
 
         Returns:
             Dict[str, Any]: JSON schema describing the operation parameters
         """
-        return self.schema_extractor.extract_from_operation(
-            operation_model_or_client, operation_name
-        )
+        return self.schema_extractor.extract_from_operation(client, operation_name)
 
     def create_parameter_mapping(self, schema: Dict[str, Any]) -> Dict[str, str]:
         """
@@ -323,17 +244,21 @@ class DynamicParameterExtractor:
             Dict[str, str]: Mapping from snake_case to original parameter names
         """
         properties = schema.get("properties", {})
-        return self.name_mapper.create_parameter_mapping(properties)
+        param_mapping = {}
+        for param_name in properties.keys():
+            snake_name = NameConverter.to_snake_case(param_name)
+            param_mapping[snake_name] = param_name
+        return param_mapping
 
     def extract_parameter_info(
-        self, operation_model_or_client, operation_name: Optional[str] = None
+        self, client, operation_name: str
     ) -> Tuple[Dict[str, Any], Set[str], Dict[str, str]]:
         """
         Extract complete parameter information for an operation.
 
         Args:
-            operation_model_or_client: Either a boto3 client or an operation model
-            operation_name: The name of the operation (required if first arg is client)
+            client: boto3 client instance
+            operation_name: The name of the operation
 
         Returns:
             Tuple containing:
@@ -341,7 +266,7 @@ class DynamicParameterExtractor:
             - required: Set of required parameter names
             - param_mapping: Dict mapping snake_case to original names
         """
-        schema = self.extract_parameter_schema(operation_model_or_client, operation_name)
+        schema = self.extract_parameter_schema(client, operation_name)
         properties = schema.get("properties", {})
         required = set(schema.get("required", []))
         param_mapping = self.create_parameter_mapping(schema)
@@ -376,15 +301,15 @@ class DynamicParameterExtractor:
         """
         return self.validator.normalize_parameter_values(parameters)
 
-    # Convenience methods for name conversion
+    # Convenience methods for name conversion using NameConverter
     def to_snake_case(self, name: str) -> str:
         """Convert PascalCase/camelCase to snake_case."""
-        return self.name_mapper.to_snake_case(name)
+        return NameConverter.to_snake_case(name)
 
     def to_kebab_case(self, name: str) -> str:
         """Convert PascalCase to kebab-case."""
-        return self.name_mapper.to_kebab_case(name)
+        return NameConverter.to_kebab_case(name)
 
     def to_camel_case(self, snake_name: str) -> str:
         """Convert snake_case to camelCase."""
-        return self.name_mapper.to_camel_case(snake_name)
+        return NameConverter.to_camel_case(snake_name)

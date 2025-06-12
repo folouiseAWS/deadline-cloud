@@ -9,20 +9,7 @@ import re
 from typing import List, Dict, Any, Optional, Union
 from botocore.model import OperationModel
 from deadline.mcp.uri_pattern_generator import DynamicURIPatternGenerator
-
-
-def _convert_to_kebab_case(name: str) -> str:
-    """Convert PascalCase to kebab-case.
-
-    Args:
-        name: PascalCase string (e.g., 'QueueFleetAssociations')
-
-    Returns:
-        str: kebab-case string (e.g., 'queue-fleet-associations')
-    """
-    # Insert hyphens before capital letters (except the first one)
-    result = re.sub(r"(?<!^)(?=[A-Z])", "-", name)
-    return result.lower()
+from deadline.mcp.utils import NameConverter
 
 
 class ResourceURIMapper:

@@ -95,12 +95,12 @@ class TestParameterProcessor:
 
     def test_snake_case_conversion(self):
         """Test PascalCase to snake_case conversion."""
-        from deadline.mcp.parameter_extractor import ParameterNameMapper
+        from deadline.mcp.utils import NameConverter
 
-        assert ParameterNameMapper.to_snake_case("farmId") == "farm_id"
-        assert ParameterNameMapper.to_snake_case("maxResults") == "max_results"
-        assert ParameterNameMapper.to_snake_case("resourceArn") == "resource_arn"
-        assert ParameterNameMapper.to_snake_case("id") == "id"
+        assert NameConverter.to_snake_case("farmId") == "farm_id"
+        assert NameConverter.to_snake_case("maxResults") == "max_results"
+        assert NameConverter.to_snake_case("resourceArn") == "resource_arn"
+        assert NameConverter.to_snake_case("id") == "id"
 
 
 class TestFunctionSignatureBuilder:
@@ -370,7 +370,8 @@ class TestIntegrationWithExistingComponents:
 
         # The classifier should be properly initialized
         assert processor.classifier is not None
-        assert hasattr(processor.classifier, "get_excluded_parameters")
+        assert hasattr(processor.classifier, "should_include_in_function_signature")
+        assert hasattr(processor.classifier, "classify_parameter")
 
     def test_resource_uri_mapper_integration(self):
         """Test that ParameterProcessor correctly uses ResourceURIMapper."""

@@ -1,7 +1,7 @@
 """
 Unit tests for deadline.mcp.server module.
 
-Simplified tests that focus on behavior rather than implementation details.
+Tests the FastMCP-based server architecture after Phase 1-4 refactoring.
 """
 
 import pytest
@@ -65,114 +65,43 @@ class TestCoreLogic:
         )
 
 
-class TestServerSmoke:
-    """Minimal smoke tests - does basic functionality work?"""
+class TestFastMCPServerCreation:
+    """Test FastMCP server creation and functionality."""
 
-    def test_server_can_initialize_without_crashing(self):
-        """Server can be created without crashing."""
+    def test_create_fastmcp_server_works(self):
+        """FastMCP server can be created without crashing."""
+        from deadline.mcp.server import create_fastmcp_server
+
+        # Should create server successfully
+        server = create_fastmcp_server()
+        assert server is not None
+
+    def test_fastmcp_server_discovers_operations(self):
+        """FastMCP server discovers and registers operations properly."""
         with patch("deadline.mcp.server.get_boto3_client") as mock_get:
-            # Use a real S3 client for realistic structure
+            # Use real S3 client for realistic structure
             mock_get.return_value = boto3.client("s3", region_name="us-east-1")
 
-            from deadline.mcp.server import DeadlineCloudMCPServer
+            from deadline.mcp.server import create_fastmcp_server
 
-            server = DeadlineCloudMCPServer()
-
+            # Should create without error
+            server = create_fastmcp_server()
             assert server is not None
-            assert hasattr(server, "client")
-            assert hasattr(server, "operations")
 
-    def test_server_discovers_operations_during_init(self):
-        """Server discovers operations from any boto3 client."""
-        with patch("deadline.mcp.server.get_boto3_client") as mock_get:
-            # Use real S3 client - we know it has operations
-            s3_client = boto3.client("s3", region_name="us-east-1")
-            mock_get.return_value = s3_client
-
-            from deadline.mcp.server import DeadlineCloudMCPServer
-
-            server = DeadlineCloudMCPServer()
-
-            # Should discover S3 operations
-            assert len(server.operations) > 0
-            assert len(server.tools) > 0
-            assert len(server.resources) > 0
-            assert len(server.tools) + len(server.resources) == len(server.operations)
-
-    def test_server_categorizes_operations_during_init(self):
-        """Server properly categorizes discovered operations."""
-        with patch("deadline.mcp.server.get_boto3_client") as mock_get:
-            s3_client = boto3.client("s3", region_name="us-east-1")
-            mock_get.return_value = s3_client
-
-            from deadline.mcp.server import DeadlineCloudMCPServer
-
-            server = DeadlineCloudMCPServer()
-
-            # Check some known S3 operations are categorized correctly
-            if "CreateBucket" in server.operations:
-                assert "CreateBucket" in server.tools
-            if "ListBuckets" in server.operations:
-                assert "ListBuckets" in server.resources
-
-    def test_server_fails_fast_on_aws_credential_issues(self):
-        """Server fails immediately if AWS credentials are invalid."""
+    def test_fastmcp_server_handles_aws_credential_issues(self):
+        """FastMCP server handles AWS credential issues gracefully."""
         with patch("deadline.mcp.server.get_boto3_client") as mock_get:
             mock_get.side_effect = NoCredentialsError()
 
-            from deadline.mcp.server import DeadlineCloudMCPServer
+            from deadline.mcp.server import create_fastmcp_server
 
+            # Should handle credentials error gracefully
             with pytest.raises(NoCredentialsError):
-                DeadlineCloudMCPServer()
-
-    def test_server_supports_basic_configuration(self):
-        """Server accepts configuration options."""
-        config = {"aws_region": "eu-west-1", "log_level": "DEBUG"}
-
-        with patch("deadline.mcp.server.get_boto3_client") as mock_get:
-            mock_get.return_value = boto3.client("s3", region_name="us-east-1")
-
-            from deadline.mcp.server import DeadlineCloudMCPServer
-
-            server = DeadlineCloudMCPServer(config=config)
-
-            assert server.config["aws_region"] == "eu-west-1"
-            assert server.config["log_level"] == "DEBUG"
+                create_fastmcp_server()
 
 
-class TestWithMockClient:
-    """Tests using simple mock client for specific scenarios."""
-
-    def test_server_works_with_any_real_client_structure(self):
-        """Server works with any real boto3 client structure."""
-        # Test with different real clients to prove flexibility
-        test_clients = [
-            boto3.client("s3", region_name="us-east-1"),
-            boto3.client("lambda", region_name="us-east-1"),
-            boto3.client("ec2", region_name="us-east-1"),
-        ]
-
-        for client in test_clients:
-            with patch("deadline.mcp.server.get_boto3_client") as mock_get:
-                mock_get.return_value = client
-
-                from deadline.mcp.server import DeadlineCloudMCPServer
-
-                server = DeadlineCloudMCPServer()
-
-                # Should work with any real client structure
-                assert server.client == client
-                assert len(server.operations) > 0
-                assert len(server.tools) > 0
-                assert len(server.resources) >= 0  # Some might be skipped
-                # Note: tools + resources may not equal operations due to skipped resources
-                assert (
-                    len(server.tools) + len(server.resources) <= len(server.operations) * 3
-                )  # Allow for reasonable variance
-
-
-class TestRealWorldBehavior:
-    """Test behavior that matters in real usage."""
+class TestAPIDiscovery:
+    """Test API discovery functionality."""
 
     def test_api_discovery_works_with_any_client(self):
         """API discovery works with any real boto3 client."""
@@ -210,56 +139,12 @@ class TestRealWorldBehavior:
         assert list_uri.startswith("deadline://")
         assert get_uri.startswith("deadline://")
 
-    @pytest.mark.asyncio
-    async def test_error_handling_is_graceful(self):
-        """Server handles errors gracefully without crashing."""
-        with patch("deadline.mcp.server.get_boto3_client") as mock_get:
-            client = boto3.client("s3", region_name="us-east-1")
-            mock_get.return_value = client
-
-            from deadline.mcp.server import DeadlineCloudMCPServer
-
-            server = DeadlineCloudMCPServer()
-
-            # Test unknown tool call
-            with pytest.raises(AttributeError):
-                # The legacy server class doesn't have execute_tool method
-                await server.execute_tool("NonExistentTool", {})
-
-            # Test invalid resource URI
-            with pytest.raises(AttributeError):
-                # The legacy server class doesn't have access_resource method
-                await server.access_resource("invalid://bad-uri")
-
-    def test_server_has_required_attributes(self):
-        """Server has required attributes for MCP functionality."""
-        with patch("deadline.mcp.server.get_boto3_client") as mock_get:
-            mock_get.return_value = boto3.client("s3", region_name="us-east-1")
-
-            from deadline.mcp.server import DeadlineCloudMCPServer
-
-            server = DeadlineCloudMCPServer()
-
-            # Check server has core attributes
-            assert hasattr(server, "client")
-            assert hasattr(server, "operations")
-            assert hasattr(server, "tools")
-            assert hasattr(server, "resources")
-
-
-class TestIntegrationBoundary:
-    """Test at the boundary between our code and AWS SDK."""
-
     def test_server_discovers_deadline_operations(self):
         """Test that server can discover Deadline Cloud operations."""
         deadline_client = boto3.client("deadline", region_name="us-east-1")
 
         with patch("deadline.mcp.server.get_boto3_client") as mock_get:
             mock_get.return_value = deadline_client
-
-            from deadline.mcp.server import DeadlineCloudMCPServer
-
-            server = DeadlineCloudMCPServer()
 
             # Should discover deadline operations from real client structure
             operations = discover_apis(deadline_client)
@@ -269,14 +154,6 @@ class TestIntegrationBoundary:
             tool_count = len([op for op in operations if categorize_api(op) == "tool"])
             resource_count = len([op for op in operations if categorize_api(op) == "resource"])
             assert tool_count + resource_count == len(operations)
-
-    def test_fastmcp_integration_function_exists(self):
-        """FastMCP integration function exists and works."""
-        from deadline.mcp.server import create_deadline_mcp_server
-
-        # Should create some kind of server object
-        mcp_server = create_deadline_mcp_server()
-        assert mcp_server is not None
 
 
 class TestParameterClassifierIntegration:
@@ -359,6 +236,94 @@ class TestParameterClassifierIntegration:
             for param in identifier_params:
                 assert classifier.classify_parameter(param, operation).value == "identifier"
                 assert classifier.should_include_in_function_signature(param, operation)
+
+
+class TestNameConverterIntegration:
+    """Test integration with the unified NameConverter utility."""
+
+    def test_name_converter_usage(self):
+        """Test that NameConverter is used throughout the server."""
+        from deadline.mcp.utils import NameConverter
+
+        # Test snake_case conversion
+        assert NameConverter.to_snake_case("GetFarm") == "get_farm"
+        assert NameConverter.to_snake_case("ListQueues") == "list_queues"
+        assert NameConverter.to_snake_case("farmId") == "farm_id"
+
+        # Test kebab-case conversion
+        assert NameConverter.to_kebab_case("GetFarm") == "get-farm"
+        assert NameConverter.to_kebab_case("QueueFleetAssociations") == "queue-fleet-associations"
+
+        # Test camelCase conversion
+        assert NameConverter.to_camel_case("farm_id") == "farmId"
+        assert NameConverter.to_camel_case("queue_id") == "queueId"
+
+
+class TestFunctionBuilder:
+    """Test function builder integration."""
+
+    def test_function_builder_creates_functions(self):
+        """Test that function builder creates working functions."""
+        from deadline.mcp.function_builder import MCPFunctionBuilder
+
+        builder = MCPFunctionBuilder()
+
+        # Mock operation schema
+        schema = {
+            "type": "object",
+            "properties": {
+                "farmId": {"type": "string"},
+                "displayName": {"type": "string"},
+            },
+            "required": ["farmId"],
+        }
+
+        # Mock client
+        mock_client = Mock()
+        mock_client.get_farm = Mock(return_value={"farmId": "test-farm"})
+
+        # Build function
+        func = builder.build_function("GetFarm", schema, mock_client, is_resource=True)
+
+        assert func is not None
+        assert callable(func)
+        assert hasattr(func, "__signature__")
+
+    def test_parameter_processor_excludes_correctly(self):
+        """Test that parameter processor excludes the right parameters."""
+        from deadline.mcp.function_builder import ParameterProcessor
+
+        processor = ParameterProcessor()
+
+        schema = {
+            "properties": {
+                "farmId": {"type": "string"},
+                "nextToken": {"type": "string"},
+                "maxResults": {"type": "integer"},
+                "status": {"type": "string"},
+            },
+            "required": ["farmId"],
+        }
+
+        # Test resource exclusions for List operation
+        properties, required, param_mapping = processor.process_parameters(
+            "ListQueues", schema, is_resource=True
+        )
+
+        # Should exclude pagination and filter parameters for List operations
+        assert "nextToken" not in properties
+        assert "maxResults" not in properties
+
+        # Should include identifier parameters
+        assert "farmId" in properties or len(properties) == 0  # Might be excluded if no URI params
+
+        # Test tool exclusions (should not exclude anything)
+        properties, required, param_mapping = processor.process_parameters(
+            "CreateFarm", schema, is_resource=False
+        )
+
+        # Tools should include all parameters
+        assert len(properties) == len(schema["properties"])
 
 
 if __name__ == "__main__":

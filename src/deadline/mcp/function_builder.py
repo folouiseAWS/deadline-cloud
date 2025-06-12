@@ -11,7 +11,7 @@ import inspect
 import re
 from deadline.mcp.boto3_adaptor import ResourceURIMapper
 from deadline.mcp.parameter_classifier import DynamicParameterClassifier
-from deadline.mcp.parameter_extractor import ParameterNameMapper
+from deadline.mcp.utils import NameConverter
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class ParameterProcessor:
         # Create parameter mapping (snake_case -> camelCase)
         param_mapping = {}
         for param_name in filtered_properties.keys():
-            snake_name = ParameterNameMapper.to_snake_case(param_name)
+            snake_name = NameConverter.to_snake_case(param_name)
             param_mapping[snake_name] = param_name
 
         return filtered_properties, filtered_required, param_mapping
@@ -108,9 +108,14 @@ class ParameterProcessor:
                 # No URI parameters = exclude everything for MCP resources
                 return set(properties.keys())
             else:
-                # Use classifier but preserve URI parameters
-                base_excluded_params = self.classifier.get_excluded_parameters(operation_name)
-                return base_excluded_params.union(base_exclusions) - uri_api_params
+                # Use pattern-based classification but preserve URI parameters
+                excluded_params = set()
+                for param_name in properties.keys():
+                    if not self.classifier.should_include_in_function_signature(
+                        param_name, operation_name, has_uri_params=True
+                    ):
+                        excluded_params.add(param_name)
+                return excluded_params.union(base_exclusions) - uri_api_params
         else:
             # Get/Describe operations: exclude only pagination parameters and principalId
             return base_exclusions.union(
@@ -238,7 +243,7 @@ class FunctionWrapperBuilder:
                         pass
 
                 # Execute the operation
-                method_name = ParameterNameMapper.to_snake_case(operation_name)
+                method_name = NameConverter.to_snake_case(operation_name)
                 try:
                     method = getattr(client, method_name)
                 except AttributeError as e:
@@ -273,7 +278,7 @@ class FunctionWrapperBuilder:
 
         # Set function metadata
         func_type = "resource" if is_resource else "tool"
-        wrapper.__name__ = f"{ParameterNameMapper.to_snake_case(operation_name)}_function"
+        wrapper.__name__ = f"{NameConverter.to_snake_case(operation_name)}_function"
         wrapper.__doc__ = f"Dynamically created {func_type} function for {operation_name}"
         wrapper.__signature__ = signature
         wrapper.__annotations__ = {"return": Dict[str, Any]}
@@ -337,7 +342,7 @@ class MCPFunctionBuilder:
                     )
                     return {"result": "No data available", "operation": operation_name}
 
-                safe_function.__name__ = f"{ParameterNameMapper.to_snake_case(operation_name)}_safe"
+                safe_function.__name__ = f"{NameConverter.to_snake_case(operation_name)}_safe"
                 safe_function.__doc__ = (
                     f"Safe function for {operation_name} (no parameters available)"
                 )

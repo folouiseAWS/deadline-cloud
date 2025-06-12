@@ -15,6 +15,7 @@ from deadline.mcp.boto3_adaptor import (
 )
 from deadline.mcp.parameter_extractor import DynamicParameterExtractor
 from deadline.mcp.function_builder import MCPFunctionBuilder
+from deadline.mcp.utils import NameConverter
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -24,11 +25,7 @@ except ImportError:
 # Global logger
 logger = logging.getLogger(__name__)
 
-# Global client and operations (will be set during initialization)
-client = None
-operations = []
-tools = {}
-resources = {}
+# Global parameter extractor
 parameter_extractor = DynamicParameterExtractor()
 
 
@@ -40,133 +37,6 @@ def get_boto3_client():
         boto3.client: Configured Deadline Cloud client
     """
     return boto3.client("deadline")
-
-
-def _convert_to_snake_case(name: str) -> str:
-    """
-    Convert PascalCase to snake_case for MCP function naming.
-
-    This conversion is critical for MCP protocol compliance as:
-    - AWS APIs use PascalCase (e.g., 'GetFarm', 'ListQueues')
-    - MCP functions should use snake_case (e.g., 'get_farm', 'list_queues')
-    - FastMCP expects consistent naming for tool/resource registration
-
-    Args:
-        name: PascalCase string from AWS operation name
-
-    Returns:
-        snake_case string suitable for MCP function names
-
-    Examples:
-        GetFarm -> get_farm
-        ListQueues -> list_queues
-        GetQueueEnvironment -> get_queue_environment
-    """
-    result = []
-    for i, char in enumerate(name):
-        if char.isupper() and i > 0:
-            result.append("_")
-        result.append(char.lower())
-    return "".join(result)
-
-
-# Global function builder instance
-_function_builder = None
-
-
-def _create_function_with_typed_params(
-    operation_name: str, schema: Dict[str, Any], is_resource: bool = False
-) -> Any:
-    """Create a function with properly typed parameters based on schema.
-
-    Now uses the modular MCPFunctionBuilder instead of monolithic logic.
-    """
-    global _function_builder
-
-    # Initialize function builder on first use
-    if _function_builder is None:
-        _function_builder = MCPFunctionBuilder()
-
-    # Use the new modular function builder
-    return _function_builder.build_function(operation_name, schema, client, is_resource)
-
-
-def _initialize_client_and_apis():
-    """
-    Initialize the boto3 client and discover all AWS Deadline Cloud APIs for MCP exposure.
-
-    This function is the core of the MCP server's API discovery system. It:
-    1. Creates a boto3 Deadline Cloud client for AWS API access
-    2. Discovers all 113 available operations through introspection
-    3. Categorizes operations as MCP tools (actions) or resources (data access)
-    4. Extracts parameter schemas for MCP protocol compliance
-    5. Generates URI patterns for MCP resource identification
-
-    The discovery process enables dynamic MCP server configuration:
-    - New AWS APIs are automatically exposed as MCP operations
-    - No manual registration required for standard operations
-    - Consistent categorization based on operation naming patterns
-
-    MCP Protocol Impact:
-    - Tools enable AI assistants to perform actions (Create, Update, Delete)
-    - Resources provide structured data access (Get, List, Search)
-    - Parameter schemas ensure proper MCP message validation
-    - URI patterns enable MCP resource template functionality
-
-    Global State Modified:
-    - client: boto3 Deadline Cloud client instance
-    - operations: List of all discovered operation names (113 total)
-    - tools: Dict of tool definitions with schemas (61 operations)
-    - resources: Dict of resource definitions with URI patterns (52 operations)
-    """
-    global client, operations, tools, resources
-
-    # Reset global state for fresh initialization (important for testing)
-    # Comment out the early return to allow re-initialization
-
-    logger.info("Initializing Deadline Cloud MCP Server...")
-
-    # Create boto3 client
-    client = get_boto3_client()
-    logger.info("boto3 client created successfully")
-
-    # Discover APIs
-    operations = discover_apis(client)
-    logger.info(f"Discovered {len(operations)} operations")
-
-    # Categorize operations
-    for operation in operations:
-        category = categorize_api(operation)
-        if category == "tool":
-            tools[operation] = {
-                "name": operation,
-                "description": f"Execute {operation} operation",
-                "schema": parameter_extractor.extract_parameter_schema(client, operation),
-            }
-        elif category == "resource":
-            schema = parameter_extractor.extract_parameter_schema(client, operation)
-            uri_pattern = ResourceURIMapper.get_uri_pattern_with_schema(operation, schema)
-
-            # Check if this operation has URI parameters but no available properties
-            # Skip registration for such operations to avoid parameter mismatches
-            import re
-
-            uri_params = set(re.findall(r"\{(\w+)\}", uri_pattern))
-            properties = schema.get("properties", {})
-
-            if uri_params and not properties:
-                logger.warning(
-                    f"Skipping resource registration for {operation} - has URI params {uri_params} but no properties"
-                )
-                continue
-
-            resources[operation] = {
-                "name": operation,
-                "uri": uri_pattern,
-                "description": f"Access {operation} data",
-            }
-
-    logger.info(f"Categorized APIs: {len(tools)} tools, {len(resources)} resources")
 
 
 def auto_register_mcp_operations(mcp_server: "FastMCP", client) -> Tuple[int, int]:
@@ -209,7 +79,7 @@ def auto_register_mcp_operations(mcp_server: "FastMCP", client) -> Tuple[int, in
 
             if category == "tool":
                 # Set proper function metadata
-                func.__name__ = f"deadline_{_convert_to_snake_case(operation_name)}"
+                func.__name__ = f"deadline_{NameConverter.to_snake_case(operation_name)}"
                 func.__doc__ = f"Execute {operation_name} operation"
 
                 # Apply tool decorator
@@ -235,7 +105,7 @@ def auto_register_mcp_operations(mcp_server: "FastMCP", client) -> Tuple[int, in
                     continue
 
                 # Set proper function metadata
-                func.__name__ = f"deadline_resource_{_convert_to_snake_case(operation_name)}"
+                func.__name__ = f"deadline_resource_{NameConverter.to_snake_case(operation_name)}"
                 func.__doc__ = f"Access {operation_name} data"
 
                 # Apply resource decorator
@@ -307,30 +177,6 @@ def create_fastmcp_server() -> Optional["FastMCP"]:
     return mcp
 
 
-class DeadlineCloudMCPServer:
-    """
-    Legacy class maintained for backward compatibility.
-
-    The actual MCP server functionality is now handled by FastMCP.
-    """
-
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """Initialize the server with immediate client creation and API discovery."""
-        self.config = config or {}
-        _initialize_client_and_apis()
-
-        # Store references for compatibility
-        self.client = client
-        self.operations = operations
-        self.tools = tools
-        self.resources = resources
-
-
-def create_deadline_mcp_server(config: Optional[Dict[str, Any]] = None) -> DeadlineCloudMCPServer:
-    """Create and return a Deadline Cloud MCP server instance."""
-    return DeadlineCloudMCPServer(config)
-
-
 def main():
     """Main entry point for the deadline-mcp console script."""
     import argparse
@@ -356,14 +202,8 @@ def main():
             # FastMCP run method may not return a coroutine, call it directly
             mcp_server.run("stdio")
         else:
-            # Fallback: print info and exit (for manual testing)
-            _initialize_client_and_apis()
-            print(f"Deadline Cloud MCP Server initialized successfully!")
-            print(f"Discovered {len(operations)} operations:")
-            print(f"  - Tools: {len(tools)}")
-            print(f"  - Resources: {len(resources)}")
-            print("\nServer is ready for MCP Inspector testing.")
-            print("Use: npx @modelcontextprotocol/inspector deadline-mcp")
+            print("Only stdio transport is supported.")
+            sys.exit(1)
 
     except ImportError as e:
         logger.error(f"Import error: {e}")

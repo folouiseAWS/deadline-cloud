@@ -9,11 +9,11 @@ import pytest
 from unittest.mock import Mock, MagicMock
 from deadline.mcp.parameter_extractor import (
     ParameterTypeConverter,
-    ParameterNameMapper,
     ParameterSchemaExtractor,
     ParameterValidator,
     DynamicParameterExtractor,
 )
+from deadline.mcp.utils import NameConverter
 
 
 class TestParameterTypeConverter:
@@ -118,53 +118,31 @@ class TestParameterTypeConverter:
         assert result == {"type": "string"}
 
 
-class TestParameterNameMapper:
-    """Test the ParameterNameMapper component."""
-
-    def setup_method(self):
-        self.mapper = ParameterNameMapper()
+class TestNameConverter:
+    """Test the NameConverter utility."""
 
     def test_to_snake_case(self):
         """Test PascalCase/camelCase to snake_case conversion."""
-        assert self.mapper.to_snake_case("farmId") == "farm_id"
-        assert self.mapper.to_snake_case("maxResults") == "max_results"
-        assert self.mapper.to_snake_case("resourceArn") == "resource_arn"
-        assert self.mapper.to_snake_case("queueEnvironmentId") == "queue_environment_id"
-        assert self.mapper.to_snake_case("id") == "id"
-        assert self.mapper.to_snake_case("HTTPSProxy") == "h_t_t_p_s_proxy"
+        assert NameConverter.to_snake_case("farmId") == "farm_id"
+        assert NameConverter.to_snake_case("maxResults") == "max_results"
+        assert NameConverter.to_snake_case("resourceArn") == "resource_arn"
+        assert NameConverter.to_snake_case("queueEnvironmentId") == "queue_environment_id"
+        assert NameConverter.to_snake_case("id") == "id"
+        assert NameConverter.to_snake_case("HTTPSProxy") == "h_t_t_p_s_proxy"
 
     def test_to_kebab_case(self):
         """Test PascalCase to kebab-case conversion."""
-        assert self.mapper.to_kebab_case("QueueFleetAssociations") == "queue-fleet-associations"
-        assert self.mapper.to_kebab_case("StorageProfile") == "storage-profile"
-        assert self.mapper.to_kebab_case("JobAttachmentSettings") == "job-attachment-settings"
-        assert self.mapper.to_kebab_case("Farm") == "farm"
+        assert NameConverter.to_kebab_case("QueueFleetAssociations") == "queue-fleet-associations"
+        assert NameConverter.to_kebab_case("StorageProfile") == "storage-profile"
+        assert NameConverter.to_kebab_case("JobAttachmentSettings") == "job-attachment-settings"
+        assert NameConverter.to_kebab_case("Farm") == "farm"
 
     def test_to_camel_case(self):
         """Test snake_case to camelCase conversion."""
-        assert self.mapper.to_camel_case("farm_id") == "farmId"
-        assert self.mapper.to_camel_case("max_results") == "maxResults"
-        assert self.mapper.to_camel_case("queue_environment_id") == "queueEnvironmentId"
-        assert self.mapper.to_camel_case("id") == "id"
-
-    def test_create_parameter_mapping(self):
-        """Test creation of parameter mapping dictionary."""
-        properties = {
-            "farmId": {"type": "string"},
-            "queueId": {"type": "string"},
-            "maxResults": {"type": "integer"},
-            "nextToken": {"type": "string"},
-        }
-
-        mapping = self.mapper.create_parameter_mapping(properties)
-
-        expected = {
-            "farm_id": "farmId",
-            "queue_id": "queueId",
-            "max_results": "maxResults",
-            "next_token": "nextToken",
-        }
-        assert mapping == expected
+        assert NameConverter.to_camel_case("farm_id") == "farmId"
+        assert NameConverter.to_camel_case("max_results") == "maxResults"
+        assert NameConverter.to_camel_case("queue_environment_id") == "queueEnvironmentId"
+        assert NameConverter.to_camel_case("id") == "id"
 
 
 class TestParameterSchemaExtractor:
@@ -205,9 +183,15 @@ class TestParameterSchemaExtractor:
         }
         assert result == expected
 
-    def test_extract_from_operation_model(self):
-        """Test schema extraction from operation model directly."""
+    def test_extract_from_client_simple(self):
+        """Test schema extraction with simple operation."""
+        # Mock client and service model
+        mock_client = Mock()
+        mock_service_model = Mock()
         mock_operation_model = Mock()
+
+        mock_client._service_model = mock_service_model
+        mock_service_model.operation_model.return_value = mock_operation_model
 
         # Mock input shape
         mock_input_shape = Mock(spec=[])
@@ -220,17 +204,24 @@ class TestParameterSchemaExtractor:
 
         mock_input_shape.members = {"name": name_shape}
 
-        result = self.extractor.extract_from_operation(mock_operation_model)
+        result = self.extractor.extract_from_operation(mock_client, "TestOperation")
 
         expected = {"type": "object", "properties": {"name": {"type": "string"}}, "required": []}
         assert result == expected
 
     def test_extract_no_input_shape(self):
         """Test extraction when operation has no input shape."""
+        # Mock client and service model
+        mock_client = Mock()
+        mock_service_model = Mock()
         mock_operation_model = Mock()
+
+        mock_client._service_model = mock_service_model
+        mock_service_model.operation_model.return_value = mock_operation_model
+
         mock_operation_model.input_shape = None
 
-        result = self.extractor.extract_from_operation(mock_operation_model)
+        result = self.extractor.extract_from_operation(mock_client, "NoInputOperation")
         assert result == {"type": "object", "properties": {}}
 
     def test_extract_exception_handling(self):
@@ -409,7 +400,6 @@ class TestDynamicParameterExtractor:
     def test_component_initialization(self):
         """Test that all components are properly initialized."""
         assert self.extractor.schema_extractor is not None
-        assert self.extractor.name_mapper is not None
         assert self.extractor.validator is not None
         assert self.extractor.type_converter is not None
 

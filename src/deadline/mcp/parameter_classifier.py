@@ -1,6 +1,6 @@
 """
 Dynamic parameter classification for MCP server.
-Replaces hardcoded exclusion lists with pattern-based rules.
+Uses pattern-based rules for clean parameter categorization.
 """
 
 import re
@@ -70,56 +70,6 @@ class DynamicParameterClassifier:
         # Include identifiers and data parameters
         return param_type in [ParameterType.IDENTIFIER, ParameterType.DATA]
 
-    def get_excluded_parameters(self, operation_name: str) -> Set[str]:
-        """Get parameters that should be excluded (for backward compatibility)."""
-        # This will be used to gradually replace hardcoded exclusion lists
-        excluded = set()
-
-        # Always exclude pagination
-        excluded.update(self._get_pagination_exclusions())
-
-        # For List/Search operations, also exclude filters
-        if operation_name.startswith(("List", "Search", "Query")):
-            excluded.update(self._get_filter_exclusions())
-
-        return excluded
-
     def _matches_patterns(self, param_name: str, patterns: List[str]) -> bool:
         """Check if parameter matches any pattern."""
         return any(re.match(pattern, param_name, re.IGNORECASE) for pattern in patterns)
-
-    def _get_pagination_exclusions(self) -> Set[str]:
-        """Get common pagination parameter names for backward compatibility."""
-        return {
-            "nextToken",
-            "maxResults",
-            "maxItems",
-            "pageSize",
-            "limit",
-            "offset",
-            "marker",
-            "continuationToken",
-            "startToken",
-            "itemOffset",
-        }
-
-    def _get_filter_exclusions(self) -> Set[str]:
-        """Get common filter parameter names for backward compatibility."""
-        return {
-            "filterExpressions",
-            "sortExpressions",
-            "queueIds",
-            "fleetIds",
-            "status",
-            "state",
-            "type",
-            "category",
-            "filter",
-            "search",
-            "sortBy",
-            "sortOrder",
-            "orderBy",
-            "direction",
-            "displayName",
-            "name",
-        }
