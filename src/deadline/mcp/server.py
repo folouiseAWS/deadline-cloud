@@ -11,9 +11,9 @@ import boto3
 from deadline.mcp.boto3_adaptor import (
     discover_apis,
     categorize_api,
-    extract_parameter_schema,
     ResourceURIMapper,
 )
+from deadline.mcp.parameter_extractor import DynamicParameterExtractor
 from deadline.mcp.function_builder import MCPFunctionBuilder
 
 try:
@@ -29,6 +29,7 @@ client = None
 operations = []
 tools = {}
 resources = {}
+parameter_extractor = DynamicParameterExtractor()
 
 
 def get_boto3_client():
@@ -140,10 +141,10 @@ def _initialize_client_and_apis():
             tools[operation] = {
                 "name": operation,
                 "description": f"Execute {operation} operation",
-                "schema": extract_parameter_schema(client, operation),
+                "schema": parameter_extractor.extract_parameter_schema(client, operation),
             }
         elif category == "resource":
-            schema = extract_parameter_schema(client, operation)
+            schema = parameter_extractor.extract_parameter_schema(client, operation)
             uri_pattern = ResourceURIMapper.get_uri_pattern_with_schema(operation, schema)
 
             # Check if this operation has URI parameters but no available properties
@@ -199,7 +200,7 @@ def auto_register_mcp_operations(mcp_server: "FastMCP", client) -> Tuple[int, in
     for operation_name in operations:
         try:
             category = categorize_api(operation_name)
-            schema = extract_parameter_schema(client, operation_name)
+            schema = parameter_extractor.extract_parameter_schema(client, operation_name)
 
             # Build function using existing sophisticated logic
             func = function_builder.build_function(

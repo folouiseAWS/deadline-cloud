@@ -17,9 +17,9 @@ from deadline.mcp.uri_pattern_generator import DynamicURIPatternGenerator
 from deadline.mcp.boto3_adaptor import (
     discover_apis,
     categorize_api,
-    extract_parameter_schema,
     ResourceURIMapper,
 )
+from deadline.mcp.parameter_extractor import DynamicParameterExtractor
 from deadline.mcp.server import create_fastmcp_server
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -103,7 +103,8 @@ class MCPPatternValidator:
 
         for operation in operations:
             try:
-                schema = extract_parameter_schema(client, operation)
+                parameter_extractor = DynamicParameterExtractor()
+                schema = parameter_extractor.extract_parameter_schema(client, operation)
                 is_valid, pattern = self.validate_operation(operation, schema)
 
                 results["patterns"][operation] = {

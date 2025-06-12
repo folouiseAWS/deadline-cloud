@@ -263,3 +263,57 @@ class TestDynamicURIPatternGenerator:
 
         pattern = self.generator.generate_pattern("GetLicenseEndpoint", schema)
         assert pattern == "deadline://license-endpoint/{license_endpoint_id}"
+
+    def test_special_case_association_operations(self):
+        """Test special case association operations that need both resource IDs."""
+        # ListQueueFleetAssociations - needs all three IDs
+        schema = {
+            "properties": {
+                "farmId": {"type": "string"},
+                "queueId": {"type": "string"},
+                "fleetId": {"type": "string"},
+            }
+        }
+        result = self.generator.generate_pattern("ListQueueFleetAssociations", schema)
+        assert result == "deadline://farm/{farm_id}/queue/{queue_id}/fleet-associations/{fleet_id}"
+
+        # ListQueueLimitAssociations - needs all three IDs
+        schema = {
+            "properties": {
+                "farmId": {"type": "string"},
+                "queueId": {"type": "string"},
+                "limitId": {"type": "string"},
+            }
+        }
+        result = self.generator.generate_pattern("ListQueueLimitAssociations", schema)
+        assert result == "deadline://farm/{farm_id}/queue/{queue_id}/limit-associations/{limit_id}"
+
+    def test_special_case_session_operations(self):
+        """Test special case session operations that need full session context."""
+        # ListSessionActions - needs full session context
+        schema = {
+            "properties": {
+                "farmId": {"type": "string"},
+                "queueId": {"type": "string"},
+                "jobId": {"type": "string"},
+                "sessionId": {"type": "string"},
+                "taskId": {"type": "string"},
+            }
+        }
+        result = self.generator.generate_pattern("ListSessionActions", schema)
+        assert (
+            result
+            == "deadline://farm/{farm_id}/queue/{queue_id}/job/{job_id}/session/{session_id}/task/{task_id}/actions"
+        )
+
+    def test_special_case_cross_hierarchy_search(self):
+        """Test special case cross-hierarchy search operations."""
+        # SearchSteps - job-scoped, not queue-scoped
+        schema = {"properties": {"farmId": {"type": "string"}, "jobId": {"type": "string"}}}
+        result = self.generator.generate_pattern("SearchSteps", schema)
+        assert result == "deadline://farm/{farm_id}/job/{job_id}/steps/search"
+
+        # SearchTasks - job-scoped, not queue-scoped
+        schema = {"properties": {"farmId": {"type": "string"}, "jobId": {"type": "string"}}}
+        result = self.generator.generate_pattern("SearchTasks", schema)
+        assert result == "deadline://farm/{farm_id}/job/{job_id}/tasks/search"

@@ -158,101 +158,63 @@ class TestCategorizeApi:
             assert result == "tool", f"Expected unknown operation {operation} to default to 'tool'"
 
 
-class TestInferResourceUriPattern:
-    """Test URI pattern inference functionality."""
+class TestResourceURIMapper:
+    """Test ResourceURIMapper functionality with no-fallback policy."""
 
-    def test_infer_resource_uri_pattern_farm_only(self):
-        """Test URI pattern inference for farm-only resources."""
-        # Arrange
-        test_cases = [
-            ("GetFarm", "deadline://farm/{farm_id}"),
-            ("ListFarms", "deadline://farms"),
-            ("DescribeFarm", "deadline://farm/{farm_id}"),
-        ]
+    def test_get_uri_pattern_without_schema_raises_error(self):
+        """Test that get_uri_pattern raises error without schema (no fallbacks allowed)."""
+        from deadline.mcp.boto3_adaptor import ResourceURIMapper
 
-        # Act & Assert
-        from deadline.mcp.boto3_adaptor import infer_resource_uri_pattern
+        with pytest.raises(ValueError, match="requires schema"):
+            ResourceURIMapper.get_uri_pattern("GetFarm")
 
-        for operation, expected_pattern in test_cases:
-            result = infer_resource_uri_pattern(operation)
-            assert result == expected_pattern, (
-                f"Expected {operation} to have pattern {expected_pattern}, got {result}"
-            )
+    def test_parse_uri_not_implemented(self):
+        """Test that parse_uri raises NotImplementedError (no fallbacks allowed)."""
+        from deadline.mcp.boto3_adaptor import ResourceURIMapper
 
-    def test_infer_resource_uri_pattern_job_hierarchy(self):
-        """Test URI pattern inference for hierarchical job resources."""
-        # Arrange
-        test_cases = [
-            ("GetJob", "deadline://farm/{farmId}/queue/{queueId}/job/{jobId}"),
-            ("ListJobs", "deadline://farm/{farmId}/queue/{queueId}/jobs"),
-            ("DescribeJob", "deadline://farm/{farmId}/queue/{queueId}/job/{jobId}"),
-        ]
+        with pytest.raises(NotImplementedError, match="URI parsing not implemented"):
+            ResourceURIMapper.parse_uri("deadline://farm/test-farm")
 
-        # Act & Assert
-        from deadline.mcp.boto3_adaptor import infer_resource_uri_pattern
+    def test_proper_schema_based_pattern_generation(self):
+        """Test that proper schema-based pattern generation works."""
+        from deadline.mcp.boto3_adaptor import ResourceURIMapper
 
-        for operation, expected_pattern in test_cases:
-            result = infer_resource_uri_pattern(operation)
-            assert result == expected_pattern, (
-                f"Expected {operation} to have pattern {expected_pattern}, got {result}"
-            )
+        schema = {"properties": {"farmId": {"type": "string"}}, "required": ["farmId"]}
+        pattern = ResourceURIMapper.get_uri_pattern_with_schema("GetFarm", schema)
+        assert pattern.startswith("deadline://")
+        assert "{farm_id}" in pattern
 
-    def test_infer_resource_uri_pattern_queue_hierarchy(self):
-        """Test URI pattern inference for queue resources."""
-        # Arrange
-        test_cases = [
-            ("GetQueue", "deadline://farm/{farmId}/queue/{queueId}"),
-            ("ListQueues", "deadline://farm/{farmId}/queues"),
-            ("DescribeQueue", "deadline://farm/{farmId}/queue/{queueId}"),
-        ]
+    def test_schema_based_pattern_generation_list_operations(self):
+        """Test schema-based pattern generation for list operations."""
+        from deadline.mcp.boto3_adaptor import ResourceURIMapper
 
-        # Act & Assert
-        from deadline.mcp.boto3_adaptor import infer_resource_uri_pattern
+        schema = {"properties": {"farmId": {"type": "string"}}, "required": ["farmId"]}
+        pattern = ResourceURIMapper.get_uri_pattern_with_schema("ListQueues", schema)
+        assert pattern.startswith("deadline://")
+        assert "farm/{farm_id}" in pattern
+        assert "queues" in pattern
 
-        for operation, expected_pattern in test_cases:
-            result = infer_resource_uri_pattern(operation)
-            assert result == expected_pattern, (
-                f"Expected {operation} to have pattern {expected_pattern}, got {result}"
-            )
+    def test_schema_based_pattern_generation_complex_hierarchy(self):
+        """Test schema-based pattern generation for complex hierarchies."""
+        from deadline.mcp.boto3_adaptor import ResourceURIMapper
 
-    def test_infer_resource_uri_pattern_list_operations(self):
-        """Test URI pattern inference for list operations."""
-        # Arrange
-        test_cases = [
-            ("ListFarms", "deadline://farms"),
-            ("ListFleets", "deadline://farm/{farmId}/fleets"),
-            ("ListWorkers", "deadline://farm/{farmId}/fleet/{fleetId}/workers"),
-            ("ListSessions", "deadline://farm/{farmId}/queue/{queueId}/sessions"),
-        ]
-
-        # Act & Assert
-        from deadline.mcp.boto3_adaptor import infer_resource_uri_pattern
-
-        for operation, expected_pattern in test_cases:
-            result = infer_resource_uri_pattern(operation)
-            assert result == expected_pattern, (
-                f"Expected {operation} to have pattern {expected_pattern}, got {result}"
-            )
-
-    def test_infer_resource_uri_pattern_handles_unknown_resources(self):
-        """Test URI pattern inference for unknown resource types."""
-        # Arrange
-        unknown_operations = ["GetUnknownResource", "ListWeirdThings", "DescribeMystery"]
-
-        # Act & Assert
-        from deadline.mcp.boto3_adaptor import infer_resource_uri_pattern
-
-        for operation in unknown_operations:
-            result = infer_resource_uri_pattern(operation)
-            # Should return a generic pattern or None
-            assert result is not None, f"Expected {operation} to return a pattern, got None"
-            assert "deadline://" in result, (
-                f"Expected {operation} pattern to include deadline:// scheme"
-            )
+        schema = {
+            "properties": {
+                "farmId": {"type": "string"},
+                "queueId": {"type": "string"},
+                "jobId": {"type": "string"},
+            },
+            "required": ["farmId", "queueId", "jobId"],
+        }
+        pattern = ResourceURIMapper.get_uri_pattern_with_schema("GetJob", schema)
+        assert pattern.startswith("deadline://")
+        assert "farm/{farm_id}" in pattern
+        assert "queue/{queue_id}" in pattern
+        assert "job/{job_id}" in pattern
 
 
-class TestExtractParameterSchema:
-    """Test parameter schema extraction from boto3 operations."""
+class TestDynamicParameterExtractor:
+    """Test parameter schema extraction using DynamicParameterExtractor."""
 
     def test_extract_parameter_schema_from_operation(self):
         """Test extracting parameter schema from a boto3 operation."""
@@ -282,9 +244,10 @@ class TestExtractParameterSchema:
         }
 
         # Act & Assert
-        from deadline.mcp.boto3_adaptor import extract_parameter_schema
+        from deadline.mcp.parameter_extractor import DynamicParameterExtractor
 
-        result = extract_parameter_schema(mock_client, "TestOperation")
+        extractor = DynamicParameterExtractor()
+        result = extractor.extract_parameter_schema(mock_client, "TestOperation")
         assert result["type"] == expected_schema["type"]
         assert "properties" in result
         assert "farmId" in result["properties"]
@@ -302,9 +265,10 @@ class TestExtractParameterSchema:
         mock_client._service_model.operation_model.return_value = mock_operation_model
 
         # Act & Assert
-        from deadline.mcp.boto3_adaptor import extract_parameter_schema
+        from deadline.mcp.parameter_extractor import DynamicParameterExtractor
 
-        result = extract_parameter_schema(mock_client, "TestOperation")
+        extractor = DynamicParameterExtractor()
+        result = extractor.extract_parameter_schema(mock_client, "TestOperation")
         assert result == {"type": "object", "properties": {}}
 
     def test_extract_parameter_schema_handles_complex_types(self):
@@ -334,9 +298,10 @@ class TestExtractParameterSchema:
         mock_client._service_model.operation_model.return_value = mock_operation_model
 
         # Act & Assert
-        from deadline.mcp.boto3_adaptor import extract_parameter_schema
+        from deadline.mcp.parameter_extractor import DynamicParameterExtractor
 
-        result = extract_parameter_schema(mock_client, "TestOperation")
+        extractor = DynamicParameterExtractor()
+        result = extractor.extract_parameter_schema(mock_client, "TestOperation")
         assert result["type"] == "object"
         assert "properties" in result
         assert "farmId" in result["properties"]

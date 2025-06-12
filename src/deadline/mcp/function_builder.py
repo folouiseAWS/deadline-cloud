@@ -11,6 +11,7 @@ import inspect
 import re
 from deadline.mcp.boto3_adaptor import ResourceURIMapper
 from deadline.mcp.parameter_classifier import DynamicParameterClassifier
+from deadline.mcp.parameter_extractor import ParameterNameMapper
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class ParameterProcessor:
         # Create parameter mapping (snake_case -> camelCase)
         param_mapping = {}
         for param_name in filtered_properties.keys():
-            snake_name = self._convert_to_snake_case(param_name)
+            snake_name = ParameterNameMapper.to_snake_case(param_name)
             param_mapping[snake_name] = param_name
 
         return filtered_properties, filtered_required, param_mapping
@@ -98,6 +99,9 @@ class ParameterProcessor:
             )
             return set()  # Don't exclude anything if there's nothing to exclude
 
+        # Always exclude principalId from resource functions - it's handled automatically
+        base_exclusions = {"principalId"}
+
         # Determine exclusions based on operation type
         if operation_name.startswith(("List", "Search", "Query")):
             if not uri_api_params:
@@ -106,34 +110,27 @@ class ParameterProcessor:
             else:
                 # Use classifier but preserve URI parameters
                 base_excluded_params = self.classifier.get_excluded_parameters(operation_name)
-                return base_excluded_params - uri_api_params
+                return base_excluded_params.union(base_exclusions) - uri_api_params
         else:
-            # Get/Describe operations: exclude only pagination parameters
-            return {
-                "nextToken",
-                "maxResults",
-                "maxItems",
-                "pageSize",
-                "limit",
-                "offset",
-                "marker",
-                "continuationToken",
-                "startToken",
-            }
+            # Get/Describe operations: exclude only pagination parameters and principalId
+            return base_exclusions.union(
+                {
+                    "nextToken",
+                    "maxResults",
+                    "maxItems",
+                    "pageSize",
+                    "limit",
+                    "offset",
+                    "marker",
+                    "continuationToken",
+                    "startToken",
+                }
+            )
 
     def _get_tool_exclusions(self, operation_name: str) -> Set[str]:
         """Get parameter exclusions for tool functions."""
         # Tools don't exclude parameters - they need all parameters for actions
         return set()
-
-    def _convert_to_snake_case(self, name: str) -> str:
-        """Convert PascalCase to snake_case."""
-        result = []
-        for i, char in enumerate(name):
-            if char.isupper() and i > 0:
-                result.append("_")
-            result.append(char.lower())
-        return "".join(result)
 
 
 class FunctionSignatureBuilder:
@@ -223,8 +220,25 @@ class FunctionWrapperBuilder:
                         original_name = param_mapping[param_name]
                         api_kwargs[original_name] = value
 
+                # Auto-inject principalId for List operations (like client API does)
+                if (
+                    operation_name.startswith(("List", "Search", "Query"))
+                    and "principalId" not in api_kwargs
+                ):
+                    try:
+                        # Import here to avoid circular dependencies
+                        from deadline.client.api._session import get_user_and_identity_store_id
+
+                        user_id, _ = get_user_and_identity_store_id()
+                        if user_id:
+                            api_kwargs["principalId"] = user_id
+                    except (ImportError, Exception):
+                        # If we can't get user ID, continue without it
+                        # The API call may still work depending on permissions
+                        pass
+
                 # Execute the operation
-                method_name = self._convert_to_snake_case(operation_name)
+                method_name = ParameterNameMapper.to_snake_case(operation_name)
                 try:
                     method = getattr(client, method_name)
                 except AttributeError as e:
@@ -259,7 +273,7 @@ class FunctionWrapperBuilder:
 
         # Set function metadata
         func_type = "resource" if is_resource else "tool"
-        wrapper.__name__ = f"{self._convert_to_snake_case(operation_name)}_function"
+        wrapper.__name__ = f"{ParameterNameMapper.to_snake_case(operation_name)}_function"
         wrapper.__doc__ = f"Dynamically created {func_type} function for {operation_name}"
         wrapper.__signature__ = signature
         wrapper.__annotations__ = {"return": Dict[str, Any]}
@@ -269,15 +283,6 @@ class FunctionWrapperBuilder:
             wrapper.__annotations__[param.name] = param.annotation
 
         return wrapper
-
-    def _convert_to_snake_case(self, name: str) -> str:
-        """Convert PascalCase to snake_case."""
-        result = []
-        for i, char in enumerate(name):
-            if char.isupper() and i > 0:
-                result.append("_")
-            result.append(char.lower())
-        return "".join(result)
 
 
 class MCPFunctionBuilder:
@@ -332,7 +337,7 @@ class MCPFunctionBuilder:
                     )
                     return {"result": "No data available", "operation": operation_name}
 
-                safe_function.__name__ = f"{self._convert_to_snake_case(operation_name)}_safe"
+                safe_function.__name__ = f"{ParameterNameMapper.to_snake_case(operation_name)}_safe"
                 safe_function.__doc__ = (
                     f"Safe function for {operation_name} (no parameters available)"
                 )

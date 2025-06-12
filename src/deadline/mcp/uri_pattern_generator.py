@@ -1,6 +1,6 @@
 """
 Dynamic URI pattern generation for MCP resources.
-Infers hierarchical patterns from operation parameters.
+Infers hierarchical patterns from operation parameters using actual AWS API parameter names.
 """
 
 from typing import Dict, Any, List
@@ -8,24 +8,57 @@ import re
 
 
 class DynamicURIPatternGenerator:
-    """Generates URI patterns dynamically from operation schemas."""
+    """Generates URI patterns dynamically from operation schemas using actual parameter names."""
 
     def generate_pattern(self, operation_name: str, schema: Dict[str, Any]) -> str:
-        """Generate URI pattern using intelligent analysis of parameters."""
+        """Generate URI pattern using actual parameter names from schema."""
         properties = schema.get("properties", {})
 
-        # Analyze parameter relationships dynamically
+        # Tier 1: Check for special case operations first
+        special_pattern = self._handle_special_case_operations(operation_name, properties)
+        if special_pattern:
+            return special_pattern
+
+        # Tier 2: Standard hierarchical pattern generation
         hierarchy = self._infer_resource_hierarchy(properties)
         resource_type = self._extract_resource_type(operation_name)
         operation_type = self._get_operation_type(operation_name)
 
-        return self._build_hierarchical_pattern(hierarchy, resource_type, operation_type)
+        return self._build_hierarchical_pattern(
+            hierarchy, resource_type, operation_type, properties, operation_name
+        )
+
+    def _handle_special_case_operations(self, operation_name: str, properties: Dict) -> str:
+        """Handle special case operations that don't follow standard hierarchy patterns."""
+
+        # Association Operations - need both resource IDs in URI
+        if operation_name == "ListQueueFleetAssociations":
+            if "farmId" in properties and "queueId" in properties and "fleetId" in properties:
+                return "deadline://farm/{farm_id}/queue/{queue_id}/fleet-associations/{fleet_id}"
+
+        if operation_name == "ListQueueLimitAssociations":
+            if "farmId" in properties and "queueId" in properties and "limitId" in properties:
+                return "deadline://farm/{farm_id}/queue/{queue_id}/limit-associations/{limit_id}"
+
+        # Session Operations - need full session context
+        if operation_name == "ListSessionActions":
+            required_params = {"farmId", "queueId", "jobId", "sessionId", "taskId"}
+            if required_params.issubset(set(properties.keys())):
+                return "deadline://farm/{farm_id}/queue/{queue_id}/job/{job_id}/session/{session_id}/task/{task_id}/actions"
+
+        # Cross-hierarchy Search Operations - job-scoped, not queue-scoped
+        if operation_name in ["SearchSteps", "SearchTasks"]:
+            if "farmId" in properties and "jobId" in properties:
+                resource_type = "steps" if "Steps" in operation_name else "tasks"
+                return f"deadline://farm/{{farm_id}}/job/{{job_id}}/{resource_type}/search"
+
+        return None  # Use standard hierarchy inference
 
     def _infer_resource_hierarchy(self, properties: Dict) -> List[str]:
-        """Dynamically determine resource hierarchy from parameters."""
+        """Dynamically determine resource hierarchy from actual parameters."""
         hierarchy = []
 
-        # Build hierarchy based on common AWS Deadline patterns
+        # Build hierarchy based on common AWS Deadline patterns using actual parameter names
         if "farmId" in properties:
             hierarchy.append("farm/{farm_id}")
 
@@ -73,6 +106,10 @@ class DynamicURIPatternGenerator:
             elif "licenseEndpointId" in properties:
                 hierarchy.append("license-endpoint/{license_endpoint_id}")
 
+            # Handle limit operations
+            elif "limitId" in properties:
+                hierarchy.append("limit/{limit_id}")
+
         return hierarchy
 
     def _extract_resource_type(self, operation_name: str) -> str:
@@ -97,10 +134,38 @@ class DynamicURIPatternGenerator:
         else:
             return "action"
 
-    def _build_hierarchical_pattern(
-        self, hierarchy: List[str], resource_type: str, op_type: str
+    def _find_actual_id_parameter(
+        self, properties: Dict, operation_name: str, resource_type: str
     ) -> str:
-        """Build final URI pattern from inferred hierarchy."""
+        """Find the actual ID parameter name from the schema for specific operations."""
+        # Handle specific problematic operations with explicit mappings
+        operation_id_mappings = {
+            "GetQueueFleetAssociation": "fleetId",
+            "GetQueueLimitAssociation": "limitId",
+            "GetSessionsStatisticsAggregation": "aggregationId",
+            "GetStorageProfileForQueue": "storageProfileId",
+        }
+
+        if operation_name in operation_id_mappings:
+            api_param = operation_id_mappings[operation_name]
+            if api_param in properties:
+                # Convert camelCase to snake_case for URI
+                snake_case = re.sub(r"(?<!^)(?=[A-Z])", "_", api_param).lower()
+                return snake_case
+
+        # For all other operations, use resource-based parameter names for consistency
+        resource_snake = resource_type.replace("-", "_")
+        return f"{resource_snake}_id"
+
+    def _build_hierarchical_pattern(
+        self,
+        hierarchy: List[str],
+        resource_type: str,
+        op_type: str,
+        properties: Dict,
+        operation_name: str,
+    ) -> str:
+        """Build final URI pattern from inferred hierarchy using actual parameter names."""
         if hierarchy:
             base = "deadline://" + "/".join(hierarchy)
         else:
@@ -118,12 +183,14 @@ class DynamicURIPatternGenerator:
                 return f"{base}{plural_resource}"
 
         elif op_type in ["get", "describe"]:
-            # Individual resource endpoint - check if already in hierarchy to avoid duplication
-            id_param = f"{resource_type.replace('-', '_')}_id"
-            resource_segment = f"{resource_type}/{{{id_param}}}"
+            # Individual resource endpoint - use actual parameter name
+            actual_id_param = self._find_actual_id_parameter(
+                properties, operation_name, resource_type
+            )
+            resource_segment = f"{resource_type}/{{{actual_id_param}}}"
 
             # Check if the resource is already at the end of the hierarchy
-            if hierarchy and hierarchy[-1].startswith(f"{resource_type}/{{"):
+            if hierarchy and any(f"/{{{actual_id_param}}}" in h for h in hierarchy):
                 # Resource already in hierarchy, don't duplicate
                 return base
             else:

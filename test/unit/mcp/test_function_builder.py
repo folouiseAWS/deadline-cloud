@@ -95,10 +95,12 @@ class TestParameterProcessor:
 
     def test_snake_case_conversion(self):
         """Test PascalCase to snake_case conversion."""
-        assert self.processor._convert_to_snake_case("farmId") == "farm_id"
-        assert self.processor._convert_to_snake_case("maxResults") == "max_results"
-        assert self.processor._convert_to_snake_case("resourceArn") == "resource_arn"
-        assert self.processor._convert_to_snake_case("id") == "id"
+        from deadline.mcp.parameter_extractor import ParameterNameMapper
+
+        assert ParameterNameMapper.to_snake_case("farmId") == "farm_id"
+        assert ParameterNameMapper.to_snake_case("maxResults") == "max_results"
+        assert ParameterNameMapper.to_snake_case("resourceArn") == "resource_arn"
+        assert ParameterNameMapper.to_snake_case("id") == "id"
 
 
 class TestFunctionSignatureBuilder:
@@ -201,9 +203,11 @@ class TestFunctionWrapperBuilder:
 
         wrapper = self.builder.build_wrapper("GetFarm", signature, param_mapping, mock_client)
 
-        # Call without required parameter should return empty dict
+        # Call without required parameter should return error dict
         result = await wrapper()
-        assert result == {}
+        assert "error" in result
+        assert result["error"] == "Parameter binding failed"
+        assert result["operation"] == "GetFarm"
 
     @pytest.mark.asyncio
     async def test_api_exception_handling(self):
@@ -219,9 +223,12 @@ class TestFunctionWrapperBuilder:
 
         wrapper = self.builder.build_wrapper("GetFarm", signature, param_mapping, mock_client)
 
-        # API exception should return empty dict
+        # API exception should return error dict
         result = await wrapper(farm_id="test-farm")
-        assert result == {}
+        assert "error" in result
+        assert result["error"] == "API call failed"
+        assert result["operation"] == "GetFarm"
+        assert "API Error" in result["message"]
 
     def test_wrapper_metadata(self):
         """Test that wrapper has correct metadata."""

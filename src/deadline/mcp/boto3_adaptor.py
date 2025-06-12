@@ -47,9 +47,11 @@ class ResourceURIMapper:
         Returns:
             str: The URI pattern for the resource
         """
-        # All operations now use dynamic pattern generation
-        # Fallback to original logic for unknown operations
-        return cls._infer_pattern_fallback(operation_name)
+        # All operations must use proper schema-based generation
+        # No fallbacks allowed per .clinerules
+        raise ValueError(
+            f"get_uri_pattern() requires schema - use get_uri_pattern_with_schema() for {operation_name}"
+        )
 
     @classmethod
     def parse_uri(cls, uri: str) -> tuple[str, Dict[str, Any]]:
@@ -67,9 +69,9 @@ class ResourceURIMapper:
 
         path = uri[11:]  # Remove "deadline://"
 
-        # All explicit mappings removed - use fallback parsing only
-        # Fallback for simple patterns
-        return cls._parse_fallback(path)
+        # No fallbacks allowed per .clinerules - parsing not supported yet
+        # URI parsing should be implemented properly with schema-based matching
+        raise NotImplementedError(f"URI parsing not implemented - received path: {path}")
 
     @classmethod
     def _match_pattern(cls, path: str, pattern: str) -> Optional[Dict[str, str]]:
@@ -94,38 +96,6 @@ class ResourceURIMapper:
         return None
 
     @classmethod
-    def _infer_pattern_fallback(cls, operation_name: str) -> str:
-        """
-        Fallback logic for operations not in explicit mappings.
-
-        Note: This creates generic patterns. For proper parameter matching,
-        use get_uri_pattern_with_schema() instead.
-
-        Args:
-            operation_name: The operation name
-
-        Returns:
-            str: Inferred URI pattern
-        """
-        # Extract potential resource name from operation
-        resource_match = re.search(r"(Get|List|Describe)(.+)", operation_name)
-        if resource_match:
-            resource_name = resource_match.group(2)
-            # Convert PascalCase to kebab-case for better URI readability
-            kebab_name = _convert_to_kebab_case(resource_name)
-            if operation_name.startswith("List"):
-                # Avoid double 's' if resource name already ends with 's'
-                if kebab_name.endswith("s"):
-                    return f"deadline://{kebab_name}"
-                else:
-                    return f"deadline://{kebab_name}s"
-            else:
-                return f"deadline://{kebab_name}/{{id}}"
-
-        # Final fallback
-        return "deadline://unknown/{id}"
-
-    @classmethod
     def get_uri_pattern_with_schema(cls, operation_name: str, schema: Dict[str, Any]) -> str:
         """
         Get URI pattern for operation using parameter schema to ensure parameter matching.
@@ -141,40 +111,6 @@ class ResourceURIMapper:
         # Use dynamic URI pattern generator for all operations
         generator = DynamicURIPatternGenerator()
         return generator.generate_pattern(operation_name, schema)
-
-    @classmethod
-    def _parse_fallback(cls, path: str) -> tuple[str, Dict[str, Any]]:
-        """
-        Fallback parsing for simple patterns.
-
-        Args:
-            path: The URI path to parse
-
-        Returns:
-            tuple[str, Dict[str, Any]]: (operation_name, parameters)
-        """
-        parts = path.split("/")
-
-        if len(parts) == 1:
-            # List operation, e.g., "farms" -> "ListFarms"
-            resource_type = parts[0]
-            if resource_type == "farms":
-                return ("ListFarms", {})
-            elif resource_type == "queues":
-                return ("ListQueues", {})
-            elif resource_type == "jobs":
-                return ("ListJobs", {})
-        elif len(parts) == 2:
-            # Get operation, e.g., "farm/farm-123" -> "GetFarm"
-            resource_type, resource_id = parts
-            if resource_type == "farm":
-                return ("GetFarm", {"farmId": resource_id})
-            elif resource_type == "queue":
-                return ("GetQueue", {"queueId": resource_id})
-            elif resource_type == "job":
-                return ("GetJob", {"jobId": resource_id})
-
-        raise ValueError(f"Cannot parse URI path: {path}")
 
 
 def discover_apis(client) -> List[str]:
@@ -296,133 +232,3 @@ def categorize_api(operation_name: str) -> str:
 
     # Default to tool for unknown patterns
     return "tool"
-
-
-def extract_parameter_schema(client, operation_name: str) -> Dict[str, Any]:
-    """
-    Extract JSON schema for parameters from a boto3 operation.
-
-    Args:
-        client: The boto3 client
-        operation_name: The name of the operation
-
-    Returns:
-        Dict[str, Any]: JSON schema describing the operation parameters
-    """
-    try:
-        if not hasattr(client, "_service_model"):
-            return {"type": "object", "properties": {}}
-
-        service_model = client._service_model
-        if not hasattr(service_model, "operation_model"):
-            return {"type": "object", "properties": {}}
-
-        operation_model = service_model.operation_model(operation_name)
-
-        if (
-            not operation_model
-            or not hasattr(operation_model, "input_shape")
-            or not operation_model.input_shape
-        ):
-            return {"type": "object", "properties": {}}
-
-        input_shape = operation_model.input_shape
-        if not hasattr(input_shape, "members") or not input_shape.members:
-            return {"type": "object", "properties": {}}
-
-        schema = {"type": "object", "properties": {}, "required": []}
-
-        # Get required members from the input shape
-        required_members = getattr(input_shape, "required_members", [])
-
-        for param_name, param_shape in input_shape.members.items():
-            param_schema = _convert_shape_to_schema(param_shape, visited_shapes=set())
-            schema["properties"][param_name] = param_schema
-
-            # Add to required if the parameter is in the required_members list
-            if param_name in required_members:
-                schema["required"].append(param_name)
-
-        return schema
-    except Exception:
-        return {"type": "object", "properties": {}}
-
-
-def _convert_shape_to_schema(shape, visited_shapes=None) -> Dict[str, Any]:
-    """
-    Convert a boto3 shape to JSON schema format.
-
-    Args:
-        shape: The boto3 shape to convert
-        visited_shapes: Set to track visited shapes to avoid infinite recursion
-
-    Returns:
-        Dict[str, Any]: JSON schema representation of the shape
-    """
-    # Initialize visited shapes tracking set
-    if visited_shapes is None:
-        visited_shapes = set()
-
-    # Check for circular references
-    shape_name = getattr(shape, "name", None)
-    if shape_name is not None and shape_name in visited_shapes:
-        # Return a simplified schema to break the recursion
-        return {"type": "object", "description": f"Circular reference to {shape_name}"}
-
-    # Add current shape to visited set if it has a name
-    if shape_name is not None:
-        visited_shapes.add(shape_name)
-    if not hasattr(shape, "type_name"):
-        return {"type": "string"}
-
-    type_name = shape.type_name
-
-    # Basic type mappings
-    type_mapping = {
-        "string": "string",
-        "integer": "integer",
-        "long": "integer",
-        "float": "number",
-        "double": "number",
-        "boolean": "boolean",
-        "timestamp": "string",
-        "blob": "string",
-    }
-
-    if type_name in type_mapping:
-        schema = {"type": type_mapping[type_name]}
-
-        # Add description if available
-        if hasattr(shape, "documentation") and shape.documentation:
-            schema["description"] = shape.documentation
-
-        return schema
-
-    elif type_name == "list":
-        schema = {"type": "array"}
-        if hasattr(shape, "member"):
-            schema["items"] = _convert_shape_to_schema(shape.member, visited_shapes)
-        return schema
-
-    elif type_name == "map":
-        schema = {"type": "object"}
-        if hasattr(shape, "value"):
-            schema["additionalProperties"] = _convert_shape_to_schema(shape.value, visited_shapes)
-        return schema
-
-    elif type_name == "structure":
-        schema = {"type": "object", "properties": {}}
-        if hasattr(shape, "members") and shape.members:
-            try:
-                for member_name, member_shape in shape.members.items():
-                    schema["properties"][member_name] = _convert_shape_to_schema(
-                        member_shape, visited_shapes
-                    )
-            except (TypeError, AttributeError):
-                # Handle case where members is not iterable (e.g., in tests with mocks)
-                pass
-        return schema
-
-    else:
-        # Unknown type, default to string
-        return {"type": "string"}
