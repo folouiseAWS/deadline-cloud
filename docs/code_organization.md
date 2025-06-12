@@ -1,12 +1,14 @@
 # Code organization
 
-This repository is split up into two main modules:
+This repository is split up into three main modules:
 1. `src/client`
-2. `src/job_attachments`
+2. `src/job_attachments` 
+3. `src/mcp`
 
 The `src/client` organization is laid out below.
 
 For more information on job attachments, see [here](src/deadline/job_attachments/README.md).
+For more information on the MCP server, see [here](src/deadline/mcp/README.md).
 
 ### `src/client/api`
 
@@ -36,3 +38,19 @@ of various AWS Deadline Cloud resources.
 This submodule contains code related to the history of job submissions
 performed on the workstation. Its initial functionality is to create
 job bundle directories in a standardized manner.
+
+### `src/mcp`
+
+This submodule contains the Model Context Protocol (MCP) server implementation
+that exposes all AWS Deadline Cloud APIs as MCP tools and resources. It enables
+AI assistants like Claude to directly interact with Deadline Cloud services
+through a standardized protocol.
+
+**Key Components:**
+- `server.py` - FastMCP server orchestration and registration
+- `boto3_adaptor.py` - API discovery and categorization
+- `function_builder.py` - Type-safe function generation
+- `parameter_extractor.py` - Schema conversion pipeline
+- `parameter_classifier.py` - Dynamic parameter classification
+- `uri_pattern_generator.py` - Hierarchical URI pattern creation
+- `utils.py` - Unified name conversion utilities

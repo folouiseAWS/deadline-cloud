@@ -34,7 +34,7 @@ A **production-ready** Model Context Protocol (MCP) server that automatically ex
 
 **Key Functions**:
 - `create_fastmcp_server()`: Creates FastMCP server with dynamic API registration
-- `_initialize_client_and_apis()`: Discovers and categorizes all 113 Deadline Cloud operations
+- `auto_register_mcp_operations()`: Discovers and categorizes all 113 Deadline Cloud operations
 - `main()`: Console script entry point with stdio transport
 
 **MCP Protocol Role**:
@@ -80,7 +80,6 @@ A **production-ready** Model Context Protocol (MCP) server that automatically ex
 **Key Functions**:
 - `classify_parameter()`: Determines parameter type using regex patterns
 - `should_include_in_function_signature()`: Decides parameter inclusion for MCP compatibility
-- `get_excluded_parameters()`: Returns parameters to exclude for specific operation types
 
 **MCP Protocol Role**:
 - **Essential for Resource Templates**: Ensures only URI-relevant parameters appear in function signatures
@@ -92,7 +91,6 @@ A **production-ready** Model Context Protocol (MCP) server that automatically ex
 
 **Key Classes**:
 - `ParameterTypeConverter`: Converts boto3 shapes to JSON schema with recursion prevention
-- `ParameterNameMapper`: Handles name conversions between naming conventions
 - `ParameterSchemaExtractor`: Extracts schemas from boto3 operations
 - `ParameterValidator`: Validates parameters against schemas
 - `DynamicParameterExtractor`: Unified extraction and management system
@@ -117,6 +115,22 @@ A **production-ready** Model Context Protocol (MCP) server that automatically ex
 - Creates the URI patterns that MCP clients use to identify and access resources
 - Implements farm-based hierarchy that provides logical organization for MCP resource templates
 - Ensures URI parameters match function signatures for MCP protocol compliance
+
+### 7. **utils.py** - Unified Name Conversion
+**Purpose**: Single source of truth for all naming convention conversions
+
+**Key Classes**:
+- `NameConverter`: Centralized name conversion utilities
+
+**Key Functions**:
+- `to_snake_case()`: Converts PascalCase/camelCase to snake_case for MCP compatibility
+- `to_kebab_case()`: Converts PascalCase to kebab-case for URI patterns
+- `to_camel_case()`: Converts snake_case to camelCase for AWS API compatibility
+
+**MCP Protocol Role**:
+- Ensures consistent naming across all MCP interfaces
+- Handles parameter name translation between MCP and AWS conventions
+- Prevents naming conflicts and case sensitivity issues
 
 ## 🔄 Key Processes
 
@@ -216,7 +230,7 @@ pip install deadline-cloud[mcp]
 deadline-mcp --transport stdio
 
 # Direct execution
-python -m deadline.mcp.server --transport stdio
+python -m deadline.mcp --transport stdio
 ```
 
 ### Claude Desktop Configuration
@@ -296,7 +310,7 @@ python -m pytest test/unit/mcp/ -v
 npx @modelcontextprotocol/inspector deadline-mcp
 
 # Manual server testing
-python src/deadline/mcp/server.py --debug
+python -m deadline.mcp --debug
 ```
 
 ### Test Categories
@@ -345,5 +359,7 @@ This MCP server represents a **complete technical success**:
 - ✅ **100% API Coverage** with all 113 Deadline Cloud operations exposed
 - ✅ **Production Ready** with comprehensive error handling and testing
 - ✅ **MCP Protocol Compliant** with full FastMCP framework integration
+- ✅ **Clean Architecture** with no backward compatibility cruft
+- ✅ **Single Source of Truth** for all naming conventions and utilities
 
 The modular architecture enables easy maintenance and extension while providing robust, reliable access to AWS Deadline Cloud services through the MCP protocol.
