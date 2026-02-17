@@ -157,6 +157,8 @@ class SubmitJobToDeadlineDialog(QDialog):
         )
 
         self.gui_update_counter: Any = None
+        # Slightly taller than sizeHint to prevent scrolling on the Shared job settings tab
+        self.resize(540, 715)
         self.refresh_deadline_settings()
 
     def _submission_succeeded_signal_receiver(self, job_id: str):
