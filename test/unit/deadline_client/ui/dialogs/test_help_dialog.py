@@ -222,8 +222,12 @@ class TestHelpDialog:
             # Get the layout and find all QLabel widgets
             layout = help_dialog.layout()
             labels = []
+            assert layout is not None
             for i in range(layout.count()):
-                widget = layout.itemAt(i).widget()
+                item = layout.itemAt(i)
+                if item is None:
+                    continue
+                widget = item.widget()
                 if isinstance(widget, QLabel):
                     labels.append(widget)
 

@@ -46,7 +46,7 @@ class JobBundleSettingsWidget(QWidget):
     def __init__(self, initial_settings: JobBundleSettings, parent: Optional[QWidget] = None):
         super().__init__(parent=parent)
 
-        self.parent = parent
+        self._submit_dialog = parent
 
         self.param_layout = QVBoxLayout()
 
@@ -64,7 +64,10 @@ class JobBundleSettingsWidget(QWidget):
         # Clear the layout
         for i in reversed(range(self.param_layout.count())):
             item = self.param_layout.takeAt(i)
-            item.widget().deleteLater()
+            if item is not None:
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
 
         self.parameters_widget = OpenJDParametersWidget(
             parameter_definitions=settings.parameters, parent=self
@@ -114,8 +117,8 @@ class JobBundleSettingsWidget(QWidget):
             logger.warning(msg)
             return
 
-        if self.parent and hasattr(self.parent, "refresh"):
-            self.parent.refresh(
+        if self._submit_dialog and hasattr(self._submit_dialog, "refresh"):
+            self._submit_dialog.refresh(
                 job_settings=job_settings,
                 auto_detected_attachments=asset_references,
                 attachments=None,

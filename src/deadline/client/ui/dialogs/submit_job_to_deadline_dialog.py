@@ -34,7 +34,7 @@ from ...dataclasses import SubmitterInfo
 from ... import api
 from ..deadline_authentication_status import DeadlineAuthenticationStatus
 from .._utils import block_signals, tr
-from ...config import get_setting, set_setting, config_file
+from ...config import set_setting
 from ...exceptions import UserInitiatedCancel, NonValidInputError
 from ...job_bundle import create_job_history_bundle_dir
 from ...job_bundle.parameters import JobParameter
@@ -76,6 +76,19 @@ class SubmitJobToDeadlineDialog(QDialog):
     If you're using this dialog within an application and want it to stay in front,
     pass f=Qt.Tool, a flag that tells it to do that.
 
+    The dialog includes editable combo boxes for Farm, Queue, and Storage Profile
+    selection directly in the Shared Job Settings tab. Selections are persisted as
+    per-submitter "sticky settings" based on the ``submitter_info.submitter_name``,
+    so each DCC application (Maya, Houdini, etc.) remembers its own farm/queue/storage
+    profile independently. No changes are required in DCC submitter code to benefit
+    from this — the submitter_name is automatically derived from either the
+    ``submitter_info`` parameter or the job settings dataclass.
+
+    Sticky settings are stored at ``~/.deadline/sticky_settings/{submitter_name}.json``.
+    The first time a user selects a farm/queue in a submitter, it is also written to the
+    global config as the default. Subsequent changes only update the per-submitter sticky
+    file, leaving the global default unchanged.
+
     Args:
         job_setup_widget_type (QWidget): The type of the widget for the job-specific settings.
         initial_job_settings (dataclass): A dataclass containing the initial job settings
@@ -100,7 +113,9 @@ class SubmitJobToDeadlineDialog(QDialog):
         f: Qt Window Flags
         show_host_requirements_tab: Display the host requirements tab in dialog if set to True. Default
             to False.
-        submitter_info (SubmitterInfo): Information related to the submitter window and application it's running in
+        submitter_info (SubmitterInfo): Information related to the submitter window and application
+            it's running in. The ``submitter_name`` field is used to scope sticky settings so each
+            application remembers its own farm/queue/storage profile selection.
     """
 
     def __init__(
@@ -113,7 +128,7 @@ class SubmitJobToDeadlineDialog(QDialog):
         attachments: AssetReferences,
         on_create_job_bundle_callback: OnCreateJobBundleCallback,
         parent: Optional[QWidget] = None,
-        f: Qt.WindowFlags = Qt.WindowFlags(),
+        f: Qt.WindowFlags = Qt.WindowFlags(),  # type: ignore[name-defined]
         show_host_requirements_tab: bool = False,
         host_requirements: Optional[HostRequirements] = None,
         submitter_info: Optional[SubmitterInfo] = None,
@@ -253,8 +268,9 @@ class SubmitJobToDeadlineDialog(QDialog):
         # Enable/disable the Submit button based on whether the
         # AWS Deadline Cloud API is accessible and the farm+queue are configured.
         api_available = self.deadline_authentication_status.api_availability is True
-        farm_configured = get_setting("defaults.farm_id") != ""
-        queue_configured = get_setting("defaults.queue_id") != ""
+        dcsw = self.shared_job_settings.deadline_cloud_settings_box
+        farm_configured = dcsw.get_farm_id() != ""
+        queue_configured = dcsw.get_queue_id() != ""
         queue_valid = self.shared_job_settings.is_queue_valid()
 
         enable = api_available and farm_configured and queue_configured and queue_valid
@@ -314,12 +330,20 @@ class SubmitJobToDeadlineDialog(QDialog):
         self.shared_job_settings = SharedJobSettingsWidget(
             initial_settings=initial_job_settings,
             initial_shared_parameter_values=initial_shared_parameter_values,
+            submitter_name=self.submitter_info.submitter_name,
             parent=self,
         )
         self.shared_job_settings.parameter_changed.connect(self.on_shared_job_parameter_changed)
         self.shared_job_settings_tab.setWidget(self.shared_job_settings)
         self.shared_job_settings_tab.setWidgetResizable(True)
-        self.shared_job_settings.parameter_changed.connect(self.on_shared_job_parameter_changed)
+
+        # Wire up settings_changed from the cloud settings widget
+        self.shared_job_settings.deadline_cloud_settings_box.settings_changed.connect(
+            self._set_submit_button_state
+        )
+        self.shared_job_settings.deadline_cloud_settings_box.settings_changed.connect(
+            self.shared_job_settings.refresh_queue_parameters
+        )
 
     def _build_job_settings_tab(self, job_setup_widget_type, initial_job_settings):
         self.job_settings_tab = QScrollArea()
@@ -595,7 +619,7 @@ class SubmitJobToDeadlineDialog(QDialog):
             job_progress_dialog.start_job_submission(
                 job_bundle_dir=self.job_history_bundle_dir,
                 submitter_name=self.submitter_info.submitter_name,
-                config=config_file.read_config(),
+                config=self.shared_job_settings.deadline_cloud_settings_box.get_config(),
                 require_paths_exist=self.job_attachments.get_require_paths_exist(),
                 job_parameters=job_parameters,
                 known_asset_paths=self.known_asset_paths

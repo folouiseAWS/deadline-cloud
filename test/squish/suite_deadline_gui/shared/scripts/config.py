@@ -43,12 +43,14 @@ conflict_res_option_expected_text = conflict_res_option.replace("\\_", "_")
 logging_level = "WARNING"
 
 
+# Derive repo root from this file's location:
+# test/squish/suite_deadline_gui/shared/scripts/config.py -> 5 parents up
+_repo_root = str(Path(__file__).resolve().parents[5])
+
 # tst_verify_gui_submitter_bundles test suite:
 # Simple UI with Job Attachments (simple_ui_with_ja)
-simple_ui_with_ja = (
-    f"{home_dir}/deadline-cloud/test/squish/deadline_gui_test_samples/simple_ui_with_ja"
-)
+simple_ui_with_ja = f"{_repo_root}/test/squish/deadline_gui_test_samples/simple_ui_with_ja"
 simple_ui_with_ja_name = "Simple UI with Job Attachments"
 # Simple UI - No Job Attachments (simple_ui_no_ja)
-simple_ui_no_ja = f"{home_dir}/deadline-cloud/test/squish/deadline_gui_test_samples/simple_ui_no_ja"
+simple_ui_no_ja = f"{_repo_root}/test/squish/deadline_gui_test_samples/simple_ui_no_ja"
 simple_ui_no_ja_name = "Simple UI - No Job Attachments"

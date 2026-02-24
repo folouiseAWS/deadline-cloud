@@ -5,6 +5,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 try:
+    from qtpy.QtCore import Signal  # type: ignore
+    from qtpy.QtWidgets import QWidget  # type: ignore
+
     from deadline.client.ui.dialogs.submit_job_to_deadline_dialog import SubmitJobToDeadlineDialog
     from deadline.client.ui.dataclasses import JobBundleSettings
     from deadline.client.job_bundle.submission import AssetReferences
@@ -12,14 +15,22 @@ except ImportError:
     pytest.importorskip("deadline.client.ui.dialogs.submit_job_to_deadline_dialog")
 
 
+class _FakeJobSettingsWidget(QWidget):
+    """A real QWidget that can be placed inside a QScrollArea."""
+
+    parameter_changed = Signal(dict)
+
+    def __init__(self, *, initial_settings=None, parent=None):
+        super().__init__(parent=parent)
+
+    def update_settings(self, settings):
+        pass
+
+
 @pytest.fixture
 def mock_job_settings_widget():
-    """Create a mock job settings widget type."""
-    widget = MagicMock()
-    widget.return_value = MagicMock()
-    widget.return_value.parameter_changed = MagicMock()
-    widget.return_value.parameter_changed.connect = MagicMock()
-    return widget
+    """Return a real QWidget subclass so QScrollArea.setWidget() works."""
+    return _FakeJobSettingsWidget
 
 
 @patch("deadline.client.ui.dialogs.submit_job_to_deadline_dialog.DeadlineAuthenticationStatus")

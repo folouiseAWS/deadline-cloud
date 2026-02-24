@@ -65,6 +65,14 @@ DYLD_LIBRARY_PATH=/Users/<user>/Library/Python/3.9/lib/python/site-packages/PySi
 
 - To test that Deadline Client is registered and environment variable is configured successfully, navigate to the Test Suite Settings page (in Squish IDE) and add `config gui` to Arguments. Then, launch Deadline AUT by going to 'Run' -> 'Launch AUT' in the Squish IDE. If Deadline AUT launches successfully with no issues, you may begin writing tests using Squish IDE.
 
+## Submit Dialog: Editable Combo Boxes and Sticky Settings
+
+The submit dialog now uses editable combo boxes for Farm, Queue, and Storage Profile selection (replacing the previous read-only labels). Selections are persisted as per-submitter "sticky settings" in `~/.deadline/sticky_settings/{submitter_name}.json`.
+
+When changing the farm, the queue and storage profile selections are automatically cleared and their lists refreshed. When changing the queue, only the storage profile is cleared and refreshed.
+
+**Sticky settings cleanup between test runs:** If tests need a clean slate, delete the sticky settings files under `~/.deadline/sticky_settings/` before running. Each submitter writes its own JSON file, so removing the directory or its contents resets all sticky state.
+
 ## Deadline Cloud Resources Needed for Running Tests
 
 The following Deadline Cloud resources are needed in order to run `tst_verify_settings_dialogue` test suite:

@@ -5,7 +5,6 @@ aws_submitter_dialogue = {
     "type": "SubmitJobToDeadlineDialog",
     "unnamed": 1,
     "visible": 1,
-    "windowTitle": "Submit to AWS Deadline Cloud",
 }
 # Settings button
 settings_button = {
@@ -90,19 +89,24 @@ deadline_cloud_settings_widget = {
     "unnamed": 1,
     "visible": 1,
 }
-# Deadline Cloud Squish Farm text element
+# Deadline Cloud Squish Farm combo box element
 deadline_cloud_settings_farm_name = {
     "container": deadline_cloud_settings_widget,
-    "text": "Deadline Cloud Squish Farm",
-    "type": "QLabel",
+    "type": "DeadlineFarmListComboBox",
     "unnamed": 1,
     "visible": 1,
 }
-# Squish Automation Queue text element
+# Squish Automation Queue combo box element
 deadline_cloud_settings_queue_name = {
     "container": deadline_cloud_settings_widget,
-    "text": "Squish Automation Queue",
-    "type": "QLabel",
+    "type": "DeadlineQueueListComboBox",
+    "unnamed": 1,
+    "visible": 1,
+}
+# Storage profile combo box element
+deadline_cloud_settings_storage_profile = {
+    "container": deadline_cloud_settings_widget,
+    "type": "DeadlineStorageProfileNameListComboBox",
     "unnamed": 1,
     "visible": 1,
 }
@@ -222,13 +226,13 @@ software_environment_condapackages_text_input = {
     "unnamed": 1,
     "visible": 1,
 }
-# load different job bundle button in AWS Submitter dialogue (job-specific settings tab)
+# load different job bundle button in AWS Submitter dialogue (bottom button bar)
 load_different_job_bundle_button = {
-    "container": properties_only_widget,
-    "text": "Load a different job bundle",
+    "text": "Load Bundle",
     "type": "QPushButton",
     "unnamed": 1,
     "visible": 1,
+    "window": aws_submitter_dialogue,
 }
 # job history directory default filepath input
 job_hist_dir_dropdown = {
@@ -242,8 +246,8 @@ job_hist_dir_dropdown = {
 def deadlinecloud_farmname_locator(farm_name):
     return {
         "container": deadline_cloud_settings_widget,
-        "text": farm_name,
-        "type": "QLabel",
+        "currentText": farm_name,
+        "type": "QComboBox",
         "unnamed": 1,
         "visible": 1,
     }
@@ -252,8 +256,18 @@ def deadlinecloud_farmname_locator(farm_name):
 def deadlinecloud_queuename_locator(queue_name):
     return {
         "container": deadline_cloud_settings_widget,
-        "text": queue_name,
-        "type": "QLabel",
+        "currentText": queue_name,
+        "type": "QComboBox",
+        "unnamed": 1,
+        "visible": 1,
+    }
+
+
+def deadlinecloud_storageprofile_locator(storage_profile):
+    return {
+        "container": deadline_cloud_settings_widget,
+        "currentText": storage_profile,
+        "type": "QComboBox",
         "unnamed": 1,
         "visible": 1,
     }

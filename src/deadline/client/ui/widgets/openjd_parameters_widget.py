@@ -90,10 +90,15 @@ class OpenJDParametersWidget(QWidget):
         if isinstance(layout, QVBoxLayout):
             for index in reversed(range(layout.count())):
                 child = layout.takeAt(index)
-                if child.widget():
-                    child.widget().deleteLater()
-                elif child.layout():
-                    child.layout().deleteLater()
+                if child is None:
+                    continue
+                w = child.widget()
+                if w:
+                    w.deleteLater()
+                else:
+                    lo = child.layout()
+                    if lo:
+                        lo.deleteLater()
         else:
             layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

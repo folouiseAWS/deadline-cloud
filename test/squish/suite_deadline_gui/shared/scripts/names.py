@@ -331,7 +331,6 @@ submit_to_AWS_Deadline_Cloud_SubmitJobToDeadlineDialog = {
     "type": "SubmitJobToDeadlineDialog",
     "unnamed": 1,
     "visible": 1,
-    "windowTitle": "Submit to AWS Deadline Cloud",
 }
 submit_to_AWS_Deadline_Cloud_Settings_QPushButton = {
     "text": "Settings...",

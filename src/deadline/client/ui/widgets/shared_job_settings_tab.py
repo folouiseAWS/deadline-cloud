@@ -6,16 +6,16 @@ A UI Widget containing the render setup tab
 
 from __future__ import annotations
 
-import sys
+from configparser import ConfigParser
+
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from qtpy.QtCore import Signal  # type: ignore
 from qtpy.QtWidgets import (  # type: ignore
     QComboBox,
     QFormLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QRadioButton,
@@ -24,11 +24,20 @@ from qtpy.QtWidgets import (  # type: ignore
     QWidget,
 )
 
-from ... import api
-from ...config import get_setting
+from ...config import config_file
 from .._utils import CancelationFlag, tr
+from .._sticky_settings import StickySettingsManager
+from ._resource_combo_boxes import (
+    DeadlineFarmListComboBox,
+    DeadlineQueueListComboBox,
+    DeadlineStorageProfileNameListComboBox,
+)
 from .openjd_parameters_widget import OpenJDParametersWidget
 from ...api import get_queue_parameter_definitions
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SharedJobSettingsWidget(QWidget):  # pylint: disable=too-few-public-methods
@@ -67,6 +76,7 @@ class SharedJobSettingsWidget(QWidget):  # pylint: disable=too-few-public-method
         *,
         initial_settings: Any,
         initial_shared_parameter_values: dict[str, Any],
+        submitter_name: str = "",
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent=parent)
@@ -81,7 +91,9 @@ class SharedJobSettingsWidget(QWidget):  # pylint: disable=too-few-public-method
         )
         layout.addWidget(self.shared_job_properties_box)
 
-        self.deadline_cloud_settings_box = DeadlineCloudSettingsWidget(parent=self)
+        self.deadline_cloud_settings_box = DeadlineCloudSettingsWidget(
+            submitter_name=submitter_name, parent=self
+        )
         layout.addWidget(self.deadline_cloud_settings_box)
 
         self.queue_parameters_box = OpenJDParametersWidget(
@@ -133,8 +145,8 @@ class SharedJobSettingsWidget(QWidget):  # pylint: disable=too-few-public-method
         """
         If the default queue id or job bundle has changed, refresh the queue parameters.
         """
-        farm_id = get_setting("defaults.farm_id")
-        queue_id = get_setting("defaults.queue_id")
+        farm_id = self.deadline_cloud_settings_box.get_farm_id()
+        queue_id = self.deadline_cloud_settings_box.get_queue_id()
         if not farm_id or not queue_id:
             self.queue_parameters_box.rebuild_ui(async_loading_state="")
             return  # If the user has not selected a farm or queue ID, don't try to load
@@ -177,8 +189,8 @@ class SharedJobSettingsWidget(QWidget):  # pylint: disable=too-few-public-method
         """
         Starts a background thread to load the queue parameters.
         """
-        self.farm_id = farm_id = get_setting("defaults.farm_id")
-        self.queue_id = queue_id = get_setting("defaults.queue_id")
+        self.farm_id = farm_id = self.deadline_cloud_settings_box.get_farm_id()
+        self.queue_id = queue_id = self.deadline_cloud_settings_box.get_queue_id()
         if not self.farm_id or not self.queue_id:
             # If the user has not selected a farm or queue ID, don't bother starting
             # the thread.
@@ -473,228 +485,184 @@ class SharedJobPropertiesWidget(QGroupBox):  # pylint: disable=too-few-public-me
 
 class DeadlineCloudSettingsWidget(QGroupBox):
     """
-    UI component for the Deadline Cloud settings.
+    UI component for Deadline Cloud settings in the submit dialog.
+    Uses editable combo boxes instead of read-only labels.
     """
 
-    def __init__(self, *, parent: Optional[QWidget] = None):
+    # Emitted when farm, queue, or storage profile changes
+    settings_changed = Signal()
+
+    def __init__(
+        self,
+        *,
+        submitter_name: str = "",
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(tr("Deadline Cloud settings"), parent=parent)
-        self.deadline_settings: Dict[str, Any] = {"counter": -1}
+        self._submitter_name = submitter_name
+        self._sticky_mgr: Optional[StickySettingsManager] = None
+        if submitter_name:
+            self._sticky_mgr = StickySettingsManager(submitter_name)
+
         self.layout = QFormLayout(self)
         self.layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-
+        self._refreshing = False
         self._build_ui()
 
-    def _set_enabled_with_label(self, prop_name: str, enabled: bool):
-        """Sets the enabled status of a control and its label"""
-        getattr(self, prop_name).setEnabled(enabled)
-        getattr(self, prop_name + "_label").setEnabled(enabled)
-
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         """
-        Build the UI for the Deadline settings
+        Creates DeadlineFarmListComboBox, DeadlineQueueListComboBox,
+        and DeadlineStorageProfileNameListComboBox with refresh buttons.
         """
         self.farm_box_label = QLabel(tr("Farm"))
-        self.farm_box = DeadlineFarmDisplay()
+        self.farm_box = DeadlineFarmListComboBox()
+        self.farm_box.box.currentIndexChanged.connect(self._on_farm_changed)
+        self.farm_box.background_exception.connect(self._handle_background_exception)
         self.layout.addRow(self.farm_box_label, self.farm_box)
 
         self.queue_box_label = QLabel(tr("Queue"))
-        self.queue_box = DeadlineQueueDisplay()
+        self.queue_box = DeadlineQueueListComboBox()
+        self.queue_box.box.currentIndexChanged.connect(self._on_queue_changed)
+        self.queue_box.background_exception.connect(self._handle_background_exception)
         self.layout.addRow(self.queue_box_label, self.queue_box)
 
-    def refresh_setting_controls(self, deadline_authorized):
+        self.storage_profile_box_label = QLabel(tr("Storage profile"))
+        self.storage_profile_box = DeadlineStorageProfileNameListComboBox()
+        self.storage_profile_box.box.currentIndexChanged.connect(self._on_storage_profile_changed)
+        self.storage_profile_box.background_exception.connect(self._handle_background_exception)
+        self.layout.addRow(self.storage_profile_box_label, self.storage_profile_box)
+
+        # Set initial config
+        self._rebuild_override_config()
+
+    def _handle_background_exception(self, title: str, e: BaseException) -> None:
+        """Handles background thread exceptions from combo boxes."""
+        logger.warning("Background exception in %s: %s", title, e)
+
+    def _maybe_set_global_default(self, setting_name: str, value: str) -> None:
         """
-        Refreshes the controls for UI items that depend on the AWS Deadline Cloud API
-        for their values.
+        First-time-sets-default behavior: if the global default is empty,
+        write to global config. Once global is non-empty, do nothing.
+        """
+        if not self._sticky_mgr:
+            return
+        global_val = self._sticky_mgr.get_global_value(setting_name)
+        if not global_val and value:
+            config_file.set_setting(setting_name, value)
+
+    def _on_farm_changed(self, index: int) -> None:
+        """
+        Handles farm selection change with cascade clearing.
+        """
+        if self._refreshing:
+            return
+        new_farm_id = self.farm_box.box.itemData(index) or ""
+        if not new_farm_id or new_farm_id == "<none selected>":
+            return
+
+        self._maybe_set_global_default("defaults.farm_id", new_farm_id)
+
+        if self._sticky_mgr:
+            self._sticky_mgr.set_value("defaults.farm_id", new_farm_id)
+            self._sticky_mgr.clear_downstream("defaults.farm_id")
+
+        self._rebuild_override_config()
+        self.queue_box.refresh_list()
+        self.storage_profile_box.refresh_list()
+        self.settings_changed.emit()
+
+    def _on_queue_changed(self, index: int) -> None:
+        """
+        Handles queue selection change with cascade clearing.
+        """
+        if self._refreshing:
+            return
+        new_queue_id = self.queue_box.box.itemData(index) or ""
+        if not new_queue_id or new_queue_id == "<none selected>":
+            return
+
+        self._maybe_set_global_default("defaults.queue_id", new_queue_id)
+
+        if self._sticky_mgr:
+            self._sticky_mgr.set_value("defaults.queue_id", new_queue_id)
+            self._sticky_mgr.clear_downstream("defaults.queue_id")
+
+        self._rebuild_override_config()
+        self.storage_profile_box.refresh_list()
+        self.settings_changed.emit()
+
+    def _on_storage_profile_changed(self, index: int) -> None:
+        """
+        Handles storage profile selection change.
+        """
+        if self._refreshing:
+            return
+        new_sp_id = self.storage_profile_box.box.itemData(index) or ""
+        if new_sp_id == "<none selected>":
+            new_sp_id = ""
+
+        self._maybe_set_global_default("settings.storage_profile_id", new_sp_id)
+
+        if self._sticky_mgr:
+            self._sticky_mgr.set_value("settings.storage_profile_id", new_sp_id)
+
+        self._rebuild_override_config()
+        self.settings_changed.emit()
+
+    def _rebuild_override_config(self) -> None:
+        """
+        Rebuilds the ConfigParser with sticky overrides and
+        calls set_config() on each combo box.
+        """
+        self._override_config = self._build_override_config()
+        self.farm_box.set_config(self._override_config)
+        self.queue_box.set_config(self._override_config)
+        self.storage_profile_box.set_config(self._override_config)
+
+    def _build_override_config(self) -> ConfigParser:
+        if self._sticky_mgr:
+            return self._sticky_mgr.build_override_config()
+        return config_file.read_config()
+
+    def get_config(self) -> ConfigParser:
+        """Returns the current config with sticky overrides applied."""
+        return self._override_config
+
+    def refresh_setting_controls(self, deadline_authorized: bool) -> None:
+        """
+        Refreshes combo boxes. Reloads sticky settings, builds override config,
+        and triggers list refresh if authorized.
 
         Args:
             deadline_authorized (bool): Should be the result of a call to
                     api.check_deadline_available, for example from
                     an AWS Deadline Cloud Status Widget.
         """
-        self.farm_box.refresh(deadline_authorized)
-        self.queue_box.refresh(deadline_authorized)
-
-
-class _DeadlineNamedResourceDisplay(QWidget):
-    """
-    A Label for displaying an AWS Deadline Cloud resource, that starts displaying
-    it as the Id, but does an async call to AWS Deadline Cloud to convert it
-    to the name.
-
-    Args:
-        resource_name (str): The resource name for the list, like "Farm",
-                "Queue", "Fleet".
-        setting_name (str): The setting name for the item.
-    """
-
-    # Emitted when the background refresh thread catches an exception,
-    # provides (operation_name, BaseException)
-    background_exception = Signal(str, BaseException)
-
-    # Emitted when an async refresh_item thread completes,
-    # provides (refresh_id, id, name, description)
-    _item_update = Signal(int, str, str, str)
-
-    def __init__(self, *, resource_name, setting_name, parent: Optional[QWidget] = None):
-        super().__init__(parent=parent)
-
-        self.__refresh_thread = None
-        self.__refresh_id = 0
-        self.canceled = CancelationFlag()
-        self.destroyed.connect(self.canceled.set_canceled)
-
-        self.resource_name = resource_name
-        self.setting_name = setting_name
-        self.item_id = get_setting(self.setting_name)
-        self.item_name = ""
-        self.item_description = ""
-
-        self._build_ui()
-
-        self.label.setText(self.item_display_name())
-
-    def _build_ui(self):
-        self.label = QLabel(parent=self)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.label)
-        self._item_update.connect(self.handle_item_update)
-        self.background_exception.connect(self.handle_background_exception)
-
-    def handle_background_exception(self, e):
-        self.label.setText(self.item_id)
-        self.label.setToolTip("")
-
-    def item_display_name(self):
-        """Returns the text to display the item name as"""
-        return self.item_name or self.item_id or "<not configured>"
-
-    def refresh(self, deadline_authorized):
-        """
-        Starts a background thread to refresh the item name.
-
-        Args:
-            deadline_authorized (bool): Should be the result of a call to
-                    api.check_deadline_available, for example from
-                    an AWS Deadline Cloud Status Widget.
-        """
-        resource_id = get_setting(self.setting_name)
-        if resource_id != self.item_id or not self.item_name:
-            self.item_id = resource_id
-            self.item_name = ""
-            self.item_description = ""
-            display_name = self.item_display_name()
-            # Only call the AWS Deadline Cloud API if we've confirmed access
-            if deadline_authorized:
-                display_name = "<refreshing> - " + display_name
-
-                self.__refresh_id += 1
-                self.__refresh_thread = threading.Thread(
-                    target=self._refresh_thread_function,
-                    name=f"AWS Deadline Cloud refresh {self.resource_name} item thread",
-                    args=(self.__refresh_id,),
-                )
-                self.__refresh_thread.start()
-
-            self.label.setText(display_name)
-            self.label.setToolTip(self.item_description)
-        else:
-            self.label.setText(self.item_display_name())
-
-    def handle_item_update(self, refresh_id, id, name, description):
-        # Apply the refresh if it's still for the latest call
-        if refresh_id == self.__refresh_id:
-            self.item_id = id
-            self.item_name = name
-            self.item_description = description
-            self.label.setText(self.item_display_name())
-            self.label.setToolTip(self.item_description)
-
-    def _refresh_thread_function(self, refresh_id: int):
-        """
-        This function gets started in a background thread to refresh the list.
-        """
+        self._refreshing = True
         try:
-            item = self.get_item()
-            if not self.canceled:
-                self._item_update.emit(refresh_id, *item)
-        except BaseException as e:
-            if not self.canceled:
-                self.background_exception.emit(f"Refresh {self.resource_name} item", e)
+            if self._sticky_mgr:
+                self._sticky_mgr.reload()
+            self._rebuild_override_config()
 
+            if deadline_authorized:
+                self.farm_box.refresh_list()
+                self.queue_box.refresh_list()
+                self.storage_profile_box.refresh_list()
+            else:
+                self.farm_box.refresh_selected_id()
+                self.queue_box.refresh_selected_id()
+                self.storage_profile_box.refresh_selected_id()
+        finally:
+            self._refreshing = False
 
-class DeadlineFarmDisplay(_DeadlineNamedResourceDisplay):
-    def __init__(self, *, parent: Optional[QWidget] = None):
-        super().__init__(resource_name="Farm", setting_name="defaults.farm_id", parent=parent)
+    def get_farm_id(self) -> str:
+        """Returns the currently selected farm ID."""
+        return self.farm_box.box.currentData() or ""
 
-    def get_item(self):
-        farm_id = get_setting(self.setting_name)
-        if farm_id:
-            deadline = api.get_boto3_client("deadline")
-            response = deadline.get_farm(farmId=farm_id)
-            return (response["farmId"], response["displayName"], response["description"])
-        else:
-            return ("", "", "")
+    def get_queue_id(self) -> str:
+        """Returns the currently selected queue ID."""
+        return self.queue_box.box.currentData() or ""
 
-
-class DeadlineQueueDisplay(_DeadlineNamedResourceDisplay):
-    def __init__(self, *, parent: Optional[QWidget] = None):
-        super().__init__(resource_name="Queue", setting_name="defaults.queue_id", parent=parent)
-
-    def get_item(self):
-        farm_id = get_setting("defaults.farm_id")
-        queue_id = get_setting(self.setting_name)
-        if farm_id and queue_id:
-            deadline = api.get_boto3_client("deadline")
-            response = deadline.get_queue(farmId=farm_id, queueId=queue_id)
-            return (response["queueId"], response["displayName"], response["description"])
-        else:
-            return ("", "", "")
-
-
-class DeadlineStorageProfileNameDisplay(_DeadlineNamedResourceDisplay):
-    WINDOWS_OS = "Windows"
-    MAC_OS = "Macos"
-    LINUX_OS = "Linux"
-
-    def __init__(self, *, parent: Optional[QWidget] = None):
-        super().__init__(
-            resource_name="Storage profile name",
-            setting_name="settings.storage_profile_id",
-            parent=parent,
-        )
-
-    def get_item(self):
-        farm_id = get_setting("defaults.farm_id")
-        queue_id = get_setting("defaults.queue_id")
-        storage_profile_id = get_setting(self.setting_name)
-
-        if farm_id and queue_id and storage_profile_id:
-            deadline = api.get_boto3_client("deadline")
-            response = deadline.list_storage_profiles_for_queue(farmId=farm_id, queueId=queue_id)
-            farm_storage_profiles = response.get("storageProfiles", {})
-
-            if farm_storage_profiles:
-                storage_profile = [
-                    (item["storageProfileId"], item["displayName"], item["osFamily"])
-                    for item in farm_storage_profiles
-                    if storage_profile_id == item["storageProfileId"]
-                ]
-                return storage_profile[0]
-
-        return ("", "", "")
-
-    def _get_default_storage_profile_name(self) -> str:
-        """
-        Get a string specifying what the OS is, following the format the Deadline storage profile API expects.
-        """
-        if sys.platform.startswith("linux"):
-            return self.LINUX_OS
-
-        if sys.platform.startswith("darwin"):
-            return self.MAC_OS
-
-        if sys.platform.startswith("win"):
-            return self.WINDOWS_OS
-
-        return ""
+    def get_storage_profile_id(self) -> str:
+        """Returns the currently selected storage profile ID."""
+        return self.storage_profile_box.box.currentData() or ""
