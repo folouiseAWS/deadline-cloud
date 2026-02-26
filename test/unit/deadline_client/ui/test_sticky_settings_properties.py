@@ -85,28 +85,31 @@ class TestProperty1EffectiveValuePrecedence:
 class TestProperty2StickySettingsRoundTrip:
     """
     Property 2: Sticky settings round-trip.
-    For any valid combination of farm_id, queue_id, and storage_profile_id,
+    For any valid combination of queue_id and storage_profile_id,
     saving via set_value() and reloading produces identical values.
     """
 
     @given(
-        farm_id=resource_id_st,
         queue_id=resource_id_st,
         sp_id=resource_id_st,
     )
     @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_round_trip(self, farm_id, queue_id, sp_id, tmp_path, mock_config_file):
-        mgr = _make_manager(tmp_path, mock_config_file)
-        mgr.set_value("defaults.farm_id", farm_id)
-        mgr.set_value("defaults.queue_id", queue_id)
-        mgr.set_value("settings.storage_profile_id", sp_id)
+    def test_round_trip(self, queue_id, sp_id, tmp_path, mock_config_file):
+        # Clear any existing file to ensure clean state
+        file_path = tmp_path / "test_submitter.json"
+        if file_path.exists():
+            file_path.unlink()
 
-        # Reload from disk
-        mgr.reload()
+        with patch.object(StickySettingsManager, "_get_sticky_dir", return_value=tmp_path):
+            mgr = StickySettingsManager("test_submitter")
+            mgr.set_value("defaults.queue_id", queue_id)
+            mgr.set_value("settings.storage_profile_id", sp_id)
 
-        assert mgr._settings["defaults.farm_id"] == farm_id
-        assert mgr._settings["defaults.queue_id"] == queue_id
-        assert mgr._settings["settings.storage_profile_id"] == sp_id
+            # Reload from disk
+            mgr.reload()
+
+            assert mgr._settings["defaults.queue_id"] == queue_id
+            assert mgr._settings["settings.storage_profile_id"] == sp_id
 
 
 class TestProperty3UnrecognizedKeyFiltering:
@@ -129,7 +132,7 @@ class TestProperty3UnrecognizedKeyFiltering:
     def test_unrecognized_keys_filtered(self, extra_data, tmp_path, mock_config_file):
         # Write a JSON file with both recognized and unrecognized keys
         data = dict(extra_data)
-        data["defaults.farm_id"] = "farm-known"
+        data["defaults.queue_id"] = "queue-known"
         file_path = tmp_path / "test_submitter.json"
         file_path.write_text(json.dumps(data), encoding="utf-8")
 
@@ -148,17 +151,13 @@ class TestProperty4CascadeInvariant:
     """
 
     @given(
-        farm_id=resource_id_st,
         queue_id=resource_id_st,
         sp_id=resource_id_st,
         clear_key=st.sampled_from(_CASCADE_ORDER),
     )
     @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_cascade_invariant(
-        self, farm_id, queue_id, sp_id, clear_key, tmp_path, mock_config_file
-    ):
+    def test_cascade_invariant(self, queue_id, sp_id, clear_key, tmp_path, mock_config_file):
         mgr = _make_manager(tmp_path, mock_config_file)
-        mgr.set_value("defaults.farm_id", farm_id)
         mgr.set_value("defaults.queue_id", queue_id)
         mgr.set_value("settings.storage_profile_id", sp_id)
 
@@ -220,28 +219,28 @@ class TestProperty9OverrideConfigImmutability:
     """
 
     @given(
-        farm_id=maybe_empty_resource_id_st,
         queue_id=maybe_empty_resource_id_st,
-        global_farm=maybe_empty_resource_id_st,
+        sp_id=maybe_empty_resource_id_st,
+        global_queue=maybe_empty_resource_id_st,
     )
     @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_override_config_does_not_mutate_global(
-        self, farm_id, queue_id, global_farm, tmp_path, mock_config_file
+        self, queue_id, sp_id, global_queue, tmp_path, mock_config_file
     ):
         # Set up global config (use interpolation=None to avoid issues with % in values)
         global_config = ConfigParser(interpolation=None)
-        if global_farm:
-            global_config["defaults"] = {"farm_id": global_farm}
+        if global_queue:
+            global_config["defaults"] = {"queue_id": global_queue}
         mock_config_file.read_config.return_value = global_config
 
         # Capture the global value before
-        mock_config_file.get_setting.return_value = global_farm
+        mock_config_file.get_setting.return_value = global_queue
 
         mgr = _make_manager(tmp_path, mock_config_file)
-        if farm_id:
-            mgr.set_value("defaults.farm_id", farm_id)
         if queue_id:
             mgr.set_value("defaults.queue_id", queue_id)
+        if sp_id:
+            mgr.set_value("settings.storage_profile_id", sp_id)
 
         # Call build_override_config
         mgr.build_override_config()
@@ -264,20 +263,15 @@ class TestProperty10OverrideConfigMergeCorrectness:
     """
 
     @given(
-        sticky_farm=maybe_empty_resource_id_st,
         sticky_queue=maybe_empty_resource_id_st,
         sticky_sp=maybe_empty_resource_id_st,
     )
     @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_merge_correctness(
-        self, sticky_farm, sticky_queue, sticky_sp, tmp_path, mock_config_file
-    ):
+    def test_merge_correctness(self, sticky_queue, sticky_sp, tmp_path, mock_config_file):
         global_config = ConfigParser(interpolation=None)
         mock_config_file.read_config.return_value = global_config
 
         mgr = _make_manager(tmp_path, mock_config_file)
-        if sticky_farm:
-            mgr.set_value("defaults.farm_id", sticky_farm)
         if sticky_queue:
             mgr.set_value("defaults.queue_id", sticky_queue)
         if sticky_sp:
@@ -292,8 +286,6 @@ class TestProperty10OverrideConfigMergeCorrectness:
             if len(call[0]) == 3  # only calls with config param
         }
 
-        if sticky_farm:
-            assert set_setting_calls.get("defaults.farm_id") == sticky_farm
         if sticky_queue:
             assert set_setting_calls.get("defaults.queue_id") == sticky_queue
         if sticky_sp:

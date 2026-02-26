@@ -1,11 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 """
-Per-submitter sticky settings for farm, queue, and storage profile.
+Per-submitter sticky settings for queue and storage profile.
 
 Settings are stored in a JSON file at:
     ~/.deadline/sticky_settings/{submitter_name}.json
 
 Missing keys mean "use global default".
+Farm is always read from global config (not per-submitter).
 """
 
 import json
@@ -20,20 +21,19 @@ from ..config import config_file
 
 logger = logging.getLogger(__name__)
 
-# The three resource settings that can be overridden per-submitter
-STICKY_KEYS = ("defaults.farm_id", "defaults.queue_id", "settings.storage_profile_id")
+# The resource settings that can be overridden per-submitter (farm is global only)
+STICKY_KEYS = ("defaults.queue_id", "settings.storage_profile_id")
 
-# Cascade: changing a key clears all keys after it
-_CASCADE_ORDER = ["defaults.farm_id", "defaults.queue_id", "settings.storage_profile_id"]
+# Cascade: changing queue clears storage profile
+_CASCADE_ORDER = ["defaults.queue_id", "settings.storage_profile_id"]
 
 
 class StickySettingsManager:
     """
-    Manages per-submitter sticky settings for farm, queue, and storage profile.
+    Manages per-submitter sticky settings for queue and storage profile.
 
     The JSON structure is:
         {
-            "defaults.farm_id": "farm-abc123",
             "defaults.queue_id": "queue-xyz789",
             "settings.storage_profile_id": "sp-def456"
         }

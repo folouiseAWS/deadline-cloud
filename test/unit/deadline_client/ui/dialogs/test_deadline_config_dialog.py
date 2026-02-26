@@ -15,13 +15,10 @@ class TestDeadlineResourceListComboBox:
     """Tests for _DeadlineResourceListComboBox.refresh_selected_id()"""
 
     @patch("deadline.client.ui.widgets._resource_combo_boxes._config_file")
-    def test_shows_id_when_not_in_list(self, mock_config_file, qtbot):
+    def test_shows_none_selected_when_id_not_in_list(self, mock_config_file, qtbot):
         """
-        When user has a configured ID but lacks permission to list resources,
-        the combobox should display the raw ID instead of '<none selected>'.
-
-        This happens when a user has permission to use a queue but lacks
-        permission to call ListFarms.
+        When user has a configured ID but it's not in the list,
+        the combobox should display '<none selected>'.
         """
         mock_config_file.get_setting.return_value = "farm-abc123"
 
@@ -31,8 +28,7 @@ class TestDeadlineResourceListComboBox:
 
         widget.refresh_selected_id()
 
-        assert widget.box.currentText() == "farm-abc123"
-        assert widget.box.currentData() == "farm-abc123"
+        assert widget.box.currentText() == "<none selected>"
 
     @patch("deadline.client.ui.widgets._resource_combo_boxes._config_file")
     def test_shows_none_selected_when_no_id_configured(self, mock_config_file, qtbot):

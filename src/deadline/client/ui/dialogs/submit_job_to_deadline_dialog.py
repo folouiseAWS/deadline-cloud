@@ -76,16 +76,17 @@ class SubmitJobToDeadlineDialog(QDialog):
     If you're using this dialog within an application and want it to stay in front,
     pass f=Qt.Tool, a flag that tells it to do that.
 
-    The dialog includes editable combo boxes for Farm, Queue, and Storage Profile
+    The dialog includes editable combo boxes for Queue and Storage Profile
     selection directly in the Shared Job Settings tab. Selections are persisted as
     per-submitter "sticky settings" based on the ``submitter_info.submitter_name``,
-    so each DCC application (Maya, Houdini, etc.) remembers its own farm/queue/storage
-    profile independently. No changes are required in DCC submitter code to benefit
-    from this — the submitter_name is automatically derived from either the
-    ``submitter_info`` parameter or the job settings dataclass.
+    so each DCC application (Maya, Houdini, etc.) remembers its own queue/storage
+    profile independently. Farm is configured globally via the Settings dialog.
+    No changes are required in DCC submitter code to benefit from this — the
+    submitter_name is automatically derived from either the ``submitter_info``
+    parameter or the job settings dataclass.
 
     Sticky settings are stored at ``~/.deadline/sticky_settings/{submitter_name}.json``.
-    The first time a user selects a farm/queue in a submitter, it is also written to the
+    The first time a user selects a queue in a submitter, it is also written to the
     global config as the default. Subsequent changes only update the per-submitter sticky
     file, leaving the global default unchanged.
 
@@ -115,7 +116,7 @@ class SubmitJobToDeadlineDialog(QDialog):
             to False.
         submitter_info (SubmitterInfo): Information related to the submitter window and application
             it's running in. The ``submitter_name`` field is used to scope sticky settings so each
-            application remembers its own farm/queue/storage profile selection.
+            application remembers its own queue/storage profile selection.
     """
 
     def __init__(
@@ -308,6 +309,10 @@ class SubmitJobToDeadlineDialog(QDialog):
 
     def refresh_deadline_settings(self):
         self._set_submit_button_state()
+
+        # Skip refresh while api_availability is still being determined
+        if self.deadline_authentication_status.api_availability is None:
+            return
 
         self.shared_job_settings.deadline_cloud_settings_box.refresh_setting_controls(
             self.deadline_authentication_status.api_availability is True

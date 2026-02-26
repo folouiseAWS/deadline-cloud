@@ -89,14 +89,7 @@ deadline_cloud_settings_widget = {
     "unnamed": 1,
     "visible": 1,
 }
-# Deadline Cloud Squish Farm combo box element
-deadline_cloud_settings_farm_name = {
-    "container": deadline_cloud_settings_widget,
-    "type": "DeadlineFarmListComboBox",
-    "unnamed": 1,
-    "visible": 1,
-}
-# Squish Automation Queue combo box element
+# Queue combo box element (farm is now only in Settings dialog)
 deadline_cloud_settings_queue_name = {
     "container": deadline_cloud_settings_widget,
     "type": "DeadlineQueueListComboBox",
@@ -241,16 +234,6 @@ job_hist_dir_dropdown = {
     "type": "QComboBox",
     "visible": 1,
 }
-
-
-def deadlinecloud_farmname_locator(farm_name):
-    return {
-        "container": deadline_cloud_settings_widget,
-        "currentText": farm_name,
-        "type": "QComboBox",
-        "unnamed": 1,
-        "visible": 1,
-    }
 
 
 def deadlinecloud_queuename_locator(queue_name):

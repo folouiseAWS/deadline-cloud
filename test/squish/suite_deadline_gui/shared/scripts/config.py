@@ -18,7 +18,7 @@ windows_deadline_path_envvar = str(
 
 
 # tst_verify_settings_dialogue test suite:
-profile_name = "(default)"
+profile_name = "iadproductionsandbox-us-east-1"
 
 default_job_hist_dir_os_path = Path("~/.deadline/job_history/(default)")
 custom_job_hist_dir_os_path = Path("~/.deadline/job_history/(default)/squish_test")

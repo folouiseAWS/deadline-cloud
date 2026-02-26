@@ -28,7 +28,6 @@ from ...config import config_file
 from .._utils import CancelationFlag, tr
 from .._sticky_settings import StickySettingsManager
 from ._resource_combo_boxes import (
-    DeadlineFarmListComboBox,
     DeadlineQueueListComboBox,
     DeadlineStorageProfileNameListComboBox,
 )
@@ -489,7 +488,7 @@ class DeadlineCloudSettingsWidget(QGroupBox):
     Uses editable combo boxes instead of read-only labels.
     """
 
-    # Emitted when farm, queue, or storage profile changes
+    # Emitted when queue or storage profile changes
     settings_changed = Signal()
 
     def __init__(
@@ -511,15 +510,9 @@ class DeadlineCloudSettingsWidget(QGroupBox):
 
     def _build_ui(self) -> None:
         """
-        Creates DeadlineFarmListComboBox, DeadlineQueueListComboBox,
+        Creates editable DeadlineQueueListComboBox
         and DeadlineStorageProfileNameListComboBox with refresh buttons.
         """
-        self.farm_box_label = QLabel(tr("Farm"))
-        self.farm_box = DeadlineFarmListComboBox()
-        self.farm_box.box.currentIndexChanged.connect(self._on_farm_changed)
-        self.farm_box.background_exception.connect(self._handle_background_exception)
-        self.layout.addRow(self.farm_box_label, self.farm_box)
-
         self.queue_box_label = QLabel(tr("Queue"))
         self.queue_box = DeadlineQueueListComboBox()
         self.queue_box.box.currentIndexChanged.connect(self._on_queue_changed)
@@ -550,27 +543,6 @@ class DeadlineCloudSettingsWidget(QGroupBox):
         if not global_val and value:
             config_file.set_setting(setting_name, value)
 
-    def _on_farm_changed(self, index: int) -> None:
-        """
-        Handles farm selection change with cascade clearing.
-        """
-        if self._refreshing:
-            return
-        new_farm_id = self.farm_box.box.itemData(index) or ""
-        if not new_farm_id or new_farm_id == "<none selected>":
-            return
-
-        self._maybe_set_global_default("defaults.farm_id", new_farm_id)
-
-        if self._sticky_mgr:
-            self._sticky_mgr.set_value("defaults.farm_id", new_farm_id)
-            self._sticky_mgr.clear_downstream("defaults.farm_id")
-
-        self._rebuild_override_config()
-        self.queue_box.refresh_list()
-        self.storage_profile_box.refresh_list()
-        self.settings_changed.emit()
-
     def _on_queue_changed(self, index: int) -> None:
         """
         Handles queue selection change with cascade clearing.
@@ -578,7 +550,7 @@ class DeadlineCloudSettingsWidget(QGroupBox):
         if self._refreshing:
             return
         new_queue_id = self.queue_box.box.itemData(index) or ""
-        if not new_queue_id or new_queue_id == "<none selected>":
+        if not new_queue_id:
             return
 
         self._maybe_set_global_default("defaults.queue_id", new_queue_id)
@@ -598,8 +570,6 @@ class DeadlineCloudSettingsWidget(QGroupBox):
         if self._refreshing:
             return
         new_sp_id = self.storage_profile_box.box.itemData(index) or ""
-        if new_sp_id == "<none selected>":
-            new_sp_id = ""
 
         self._maybe_set_global_default("settings.storage_profile_id", new_sp_id)
 
@@ -615,7 +585,6 @@ class DeadlineCloudSettingsWidget(QGroupBox):
         calls set_config() on each combo box.
         """
         self._override_config = self._build_override_config()
-        self.farm_box.set_config(self._override_config)
         self.queue_box.set_config(self._override_config)
         self.storage_profile_box.set_config(self._override_config)
 
@@ -645,19 +614,17 @@ class DeadlineCloudSettingsWidget(QGroupBox):
             self._rebuild_override_config()
 
             if deadline_authorized:
-                self.farm_box.refresh_list()
                 self.queue_box.refresh_list()
                 self.storage_profile_box.refresh_list()
             else:
-                self.farm_box.refresh_selected_id()
                 self.queue_box.refresh_selected_id()
                 self.storage_profile_box.refresh_selected_id()
         finally:
             self._refreshing = False
 
     def get_farm_id(self) -> str:
-        """Returns the currently selected farm ID."""
-        return self.farm_box.box.currentData() or ""
+        """Returns the farm ID from global config."""
+        return config_file.get_setting("defaults.farm_id")
 
     def get_queue_id(self) -> str:
         """Returns the currently selected queue ID."""

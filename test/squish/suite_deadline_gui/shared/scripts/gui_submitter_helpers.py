@@ -52,7 +52,6 @@ def navigate_job_specific_settings():
 
 def verify_shared_job_settings(
     job_name: str,
-    farm_name: str = "",
     queue_name: str = "",
     storage_profile: str = "",
 ):
@@ -66,23 +65,12 @@ def verify_shared_job_settings(
         job_name,
         "Expect correct job bundle job name to be displayed by default.",
     )
-    # verify farm, queue, and storage profile combo box values if provided
-    if farm_name:
-        verify_submitter_farm(farm_name)
+    # verify queue and storage profile combo box values if provided
+    # (farm is now only in Settings dialog)
     if queue_name:
         verify_submitter_queue(queue_name)
     if storage_profile:
         verify_submitter_storage_profile(storage_profile)
-
-
-def set_submitter_farm(farm_name: str):
-    """Select a farm by name in the farm combo box."""
-    combo = _wait_for_combo_loaded(gui_submitter_locators.deadline_cloud_settings_farm_name)
-    for i in range(combo.count):
-        if str(combo.itemText(i)) == farm_name:
-            combo.setCurrentIndex(i)
-            return
-    test.fail(f"Farm '{farm_name}' not found in combo box.")
 
 
 def set_submitter_queue(queue_name: str):
@@ -103,16 +91,6 @@ def set_submitter_storage_profile(storage_profile: str):
             combo.setCurrentIndex(i)
             return
     test.fail(f"Storage profile '{storage_profile}' not found in combo box.")
-
-
-def verify_submitter_farm(farm_name: str):
-    """Verify the farm combo box shows the expected farm name."""
-    combo = _wait_for_combo_loaded(gui_submitter_locators.deadline_cloud_settings_farm_name)
-    test.compare(
-        str(combo.currentText),
-        farm_name,
-        f"Expect farm combo box to show '{farm_name}'.",
-    )
 
 
 def verify_submitter_queue(queue_name: str):

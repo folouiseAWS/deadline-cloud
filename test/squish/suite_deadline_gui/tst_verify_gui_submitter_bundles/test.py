@@ -7,12 +7,34 @@ import choose_jobbundledir_helpers
 import choose_jobbundledir_locators
 import gui_submitter_helpers
 import gui_submitter_locators
+import workstation_config_helpers
+import workstation_config_locators
+import loginout_helpers
 import squish
 import test
 
 
 def init():
-    # launch Choose Job Bundle GUI Submitter based on OS platform being tested
+    # First, launch Settings dialog to set the farm (farm is only in Settings now)
+    workstation_config_helpers.detect_platform_and_launch_deadline_config()
+    # set aws profile
+    loginout_helpers.set_aws_profile_name_and_verify_auth(config.profile_name)
+    # set farm name in Settings dialog
+    workstation_config_helpers.set_farm_name(config.farm_name)
+    # verify correct farm name is set
+    test.compare(
+        str(
+            squish.waitForObjectExists(
+                workstation_config_locators.profilesettings_defaultfarm_dropdown
+            ).currentText
+        ),
+        config.farm_name,
+        "Expect selected farm name to be set.",
+    )
+    # close Settings dialog
+    workstation_config_helpers.close_deadline_config_gui()
+
+    # Now launch Choose Job Bundle GUI Submitter
     choose_jobbundledir_helpers.detect_platform_and_launch_jobbundle_guisubmitter()
     # verify Choose job bundle directory is open
     test.compare(
@@ -46,15 +68,9 @@ def main():
         "Expect AWS Deadline Cloud Submitter to be open.",
     )
 
-    # verify combo boxes are present for farm, queue, and storage profile
-    test.log("Verify farm, queue, and storage profile combo boxes are present.")
-    test.compare(
-        squish.waitForObjectExists(
-            gui_submitter_locators.deadline_cloud_settings_farm_name
-        ).visible,
-        True,
-        "Expect farm combo box to be visible.",
-    )
+    # verify combo boxes are present for queue and storage profile
+    # (farm is now only in Settings dialog)
+    test.log("Verify queue and storage profile combo boxes are present.")
     test.compare(
         squish.waitForObjectExists(
             gui_submitter_locators.deadline_cloud_settings_queue_name
@@ -76,15 +92,8 @@ def main():
     )
     gui_submitter_helpers.verify_shared_job_settings(
         config.simple_ui_with_ja_name,
-        farm_name=config.farm_name,
         queue_name=config.queue_name,
     )
-
-    # verify farm change cascades to queue and storage profile refresh
-    test.log("Verify farm change triggers queue and storage profile list refresh.")
-    gui_submitter_helpers.set_submitter_farm(config.farm_name)
-    gui_submitter_helpers.verify_submitter_farm(config.farm_name)
-    gui_submitter_helpers.verify_submitter_queue(config.queue_name)
 
     # verify queue change refreshes storage profile
     test.log("Verify queue change triggers storage profile list refresh.")
@@ -107,7 +116,6 @@ def main():
     )
     gui_submitter_helpers.verify_shared_job_settings(
         config.simple_ui_no_ja_name,
-        farm_name=config.farm_name,
         queue_name=config.queue_name,
         storage_profile=config.storage_profile_macos,
     )

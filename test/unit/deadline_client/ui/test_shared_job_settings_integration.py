@@ -134,8 +134,8 @@ class TestQueueParameterRefreshUsesComboBoxGetters:
 
         # Add items to combo boxes so getters return real IDs
         dcsw = w.deadline_cloud_settings_box
-        dcsw.farm_box.box.addItem("Farm A", "farm-aaa")
-        dcsw.farm_box.box.setCurrentIndex(dcsw.farm_box.box.count() - 1)
+        # Farm comes from global config via get_farm_id(), mock it
+        mock_config_file.get_setting.return_value = "farm-aaa"
         dcsw.queue_box.box.addItem("Queue A", "queue-aaa")
         dcsw.queue_box.box.setCurrentIndex(dcsw.queue_box.box.count() - 1)
 
@@ -254,11 +254,11 @@ class TestSubmitButtonUsesComboBoxValues:
     ):
         """Submit button should be enabled when API available and combo boxes have IDs."""
         mock_auth_status.api_availability = True
+        # Farm comes from global config
+        mock_config_file.get_setting.return_value = "farm-aaa"
         dialog = _create_dialog(qtbot, mock_auth_status, mock_job_settings_widget)
 
         dcsw = dialog.shared_job_settings.deadline_cloud_settings_box
-        dcsw.farm_box.box.addItem("Farm A", "farm-aaa")
-        dcsw.farm_box.box.setCurrentIndex(dcsw.farm_box.box.count() - 1)
         dcsw.queue_box.box.addItem("Queue A", "queue-aaa")
         dcsw.queue_box.box.setCurrentIndex(dcsw.queue_box.box.count() - 1)
 
@@ -277,8 +277,10 @@ class TestSubmitButtonUsesComboBoxValues:
         mock_sticky_mgr,
         mock_get_queue_params,
     ):
-        """Submit button should be disabled when farm combo box is empty."""
+        """Submit button should be disabled when farm is not configured."""
         mock_auth_status.api_availability = True
+        # Farm is empty in global config
+        mock_config_file.get_setting.return_value = ""
         dialog = _create_dialog(qtbot, mock_auth_status, mock_job_settings_widget)
 
         # Queue has value but farm is empty
@@ -302,12 +304,11 @@ class TestSubmitButtonUsesComboBoxValues:
     ):
         """Submit button should be disabled when queue combo box is empty."""
         mock_auth_status.api_availability = True
+        # Farm is configured
+        mock_config_file.get_setting.return_value = "farm-aaa"
         dialog = _create_dialog(qtbot, mock_auth_status, mock_job_settings_widget)
 
-        dcsw = dialog.shared_job_settings.deadline_cloud_settings_box
-        dcsw.farm_box.box.addItem("Farm A", "farm-aaa")
-        dcsw.farm_box.box.setCurrentIndex(dcsw.farm_box.box.count() - 1)
-
+        # Queue is empty (no items added)
         with patch.object(dialog.shared_job_settings, "is_queue_valid", return_value=True):
             dialog._set_submit_button_state()
 

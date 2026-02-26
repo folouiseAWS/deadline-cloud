@@ -297,11 +297,15 @@ def check_authentication_status(config: Optional[ConfigParser] = None) -> AwsAut
             get_boto3_session(config=config).client("sts").get_caller_identity()
             return AwsAuthenticationStatus.AUTHENTICATED
         except Exception:
-            # We assume that the presence of a Deadline Cloud monitor profile
-            # means we will know everything necessary to start it and login.
-
+            # For DCM profiles, the cached session may have stale credentials.
+            # Invalidate cache and retry once before reporting NEEDS_LOGIN.
             if get_credentials_source(config) == AwsCredentialsSource.DEADLINE_CLOUD_MONITOR_LOGIN:
-                return AwsAuthenticationStatus.NEEDS_LOGIN
+                invalidate_boto3_session_cache()
+                try:
+                    get_boto3_session(config=config).client("sts").get_caller_identity()
+                    return AwsAuthenticationStatus.AUTHENTICATED
+                except Exception:
+                    return AwsAuthenticationStatus.NEEDS_LOGIN
             return AwsAuthenticationStatus.CONFIGURATION_ERROR
 
 
