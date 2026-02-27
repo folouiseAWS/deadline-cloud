@@ -52,6 +52,7 @@ def navigate_job_specific_settings():
 
 def verify_shared_job_settings(
     job_name: str,
+    farm_name: str = "",
     queue_name: str = "",
     storage_profile: str = "",
 ):
@@ -65,8 +66,9 @@ def verify_shared_job_settings(
         job_name,
         "Expect correct job bundle job name to be displayed by default.",
     )
-    # verify queue and storage profile combo box values if provided
-    # (farm is now only in Settings dialog)
+    # verify farm, queue and storage profile combo box values if provided
+    if farm_name:
+        verify_submitter_farm(farm_name)
     if queue_name:
         verify_submitter_queue(queue_name)
     if storage_profile:
@@ -110,4 +112,50 @@ def verify_submitter_storage_profile(storage_profile: str):
         str(combo.currentText),
         storage_profile,
         f"Expect storage profile combo box to show '{storage_profile}'.",
+    )
+
+
+def set_submitter_farm(farm_name: str):
+    """Select a farm by name in the farm combo box."""
+    combo = _wait_for_combo_loaded(gui_submitter_locators.deadline_cloud_settings_farm)
+    if not combo.enabled:
+        test.log(f"Farm combo is disabled (single farm), skipping selection of '{farm_name}'.")
+        return
+    for i in range(combo.count):
+        if str(combo.itemText(i)) == farm_name:
+            combo.setCurrentIndex(i)
+            return
+    test.fail(f"Farm '{farm_name}' not found in combo box.")
+
+
+def verify_submitter_farm(farm_name: str):
+    """Verify the farm combo box shows the expected farm name."""
+    combo = _wait_for_combo_loaded(gui_submitter_locators.deadline_cloud_settings_farm)
+    test.compare(
+        str(combo.currentText),
+        farm_name,
+        f"Expect farm combo box to show '{farm_name}'.",
+    )
+
+
+def verify_farm_readonly_with_tooltip():
+    """Verify farm combo is disabled with correct tooltip when only one farm."""
+    combo = _wait_for_combo_loaded(gui_submitter_locators.deadline_cloud_settings_farm)
+    test.compare(combo.enabled, False, "Expect farm combo to be disabled with single farm.")
+    test.compare(
+        str(combo.toolTip),
+        "You have access to one farm.",
+        "Expect farm tooltip for single farm.",
+    )
+
+
+def verify_storage_profile_none_with_tooltip():
+    """Verify storage profile shows 'None' and is disabled when no profiles available."""
+    combo = _wait_for_combo_loaded(gui_submitter_locators.deadline_cloud_settings_storage_profile)
+    test.compare(combo.enabled, False, "Expect storage profile combo to be disabled.")
+    test.compare(str(combo.currentText), "None", "Expect storage profile to show 'None'.")
+    test.compare(
+        str(combo.toolTip),
+        "No storage profiles available.",
+        "Expect storage profile tooltip when none available.",
     )

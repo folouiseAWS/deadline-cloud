@@ -218,23 +218,19 @@ class DeadlineStorageProfileNameListComboBox(_DeadlineResourceListComboBox):
                 config=config, farmId=default_farm_id, queueId=default_queue_id
             )
             storage_profiles = response.get("storageProfiles", [])
-            # add a "<none selected>" option since its possible to select nothing for this type
-            # of resource
-            storage_profiles.append(
-                {
-                    "storageProfileId": "",
-                    "displayName": "<none selected>",
-                    "osFamily": self._get_current_os(),
-                }
-            )
-            return sorted(
-                [
-                    (item["displayName"], item["storageProfileId"])
-                    for item in storage_profiles
-                    if self._get_current_os() == item["osFamily"].lower()
-                ],
-                key=lambda item: (item[0].casefold(), item[1]),
-            )
+            # Filter to current OS
+            filtered = [
+                (item["displayName"], item["storageProfileId"])
+                for item in storage_profiles
+                if self._get_current_os() == item["osFamily"].lower()
+            ]
+            if filtered:
+                # Add "<none selected>" option since it's possible to select nothing
+                filtered.append(("<none selected>", ""))
+                return sorted(filtered, key=lambda item: (item[0].casefold(), item[1]))
+            else:
+                # No storage profiles available for this queue/OS
+                return [("<none selected>", "")]
         else:
             return []
 

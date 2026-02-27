@@ -107,6 +107,16 @@ def set_farm_name(farm_name: str):
     test.log("Selected farm name.")
 
 
+def verify_farm_name(farm_name: str):
+    """Verify the farm combo box shows the expected farm name."""
+    combo = squish.waitForObject(workstation_config_locators.profilesettings_defaultfarm_dropdown)
+    test.compare(
+        str(combo.currentText),
+        farm_name,
+        f"Expect farm combo box to show '{farm_name}'.",
+    )
+
+
 def set_queue_name(queue_name: str):
     # open Default queue drop down menu
     squish.mouseClick(
@@ -125,6 +135,16 @@ def set_queue_name(queue_name: str):
         )
     )
     test.log("Selected queue name.")
+
+
+def verify_queue_name(queue_name: str):
+    """Verify the queue combo box shows the expected queue name."""
+    combo = squish.waitForObject(workstation_config_locators.farmsettings_defaultqueue_dropdown)
+    test.compare(
+        str(combo.currentText),
+        queue_name,
+        f"Expect queue combo box to show '{queue_name}'.",
+    )
 
 
 def set_and_verify_os_storage_profile(

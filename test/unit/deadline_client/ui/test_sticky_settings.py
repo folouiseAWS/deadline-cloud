@@ -106,13 +106,14 @@ class TestStickySettingsManagerGetEffectiveValue:
             mgr = StickySettingsManager("test_submitter")
         assert mgr.get_effective_value("defaults.queue_id") == "global-queue"
 
-    def test_empty_sticky_falls_back_to_global(self, sticky_dir, mock_config_file):
-        """An empty string sticky value should fall back to global."""
-        mock_config_file.get_setting.return_value = "global-queue"
+    def test_empty_sticky_is_valid_selection(self, sticky_dir, mock_config_file):
+        """An empty string sticky value is valid (e.g., 'none selected' for storage profile)."""
+        mock_config_file.get_setting.return_value = "global-sp"
         with patch.object(StickySettingsManager, "_get_sticky_dir", return_value=sticky_dir):
             mgr = StickySettingsManager("test_submitter")
-            mgr.set_value("defaults.queue_id", "")
-        assert mgr.get_effective_value("defaults.queue_id") == "global-queue"
+            mgr.set_value("settings.storage_profile_id", "")
+        # Empty string should be returned, not fall back to global
+        assert mgr.get_effective_value("settings.storage_profile_id") == ""
 
 
 class TestStickySettingsManagerClearDownstream:
@@ -212,3 +213,118 @@ class TestStickySettingsManagerSetValue:
             mgr = StickySettingsManager("test_submitter")
             mgr.set_value("bogus.key", "some-value")
         assert "bogus.key" not in mgr._settings
+
+
+class TestStickySettingsFarmChange:
+    """Tests for farm as a sticky setting."""
+
+    def test_sticky_farm_overrides_global(self, sticky_dir, mock_config_file):
+        """Sticky farm should override global farm."""
+        data = {
+            "defaults.farm_id": "sticky-farm-123",
+            "defaults.queue_id": "sticky-queue",
+        }
+        (sticky_dir / "test_submitter.json").write_text(json.dumps(data), encoding="utf-8")
+
+        # Global farm is different
+        mock_config_file.get_setting.return_value = "global-farm-456"
+
+        with patch.object(StickySettingsManager, "_get_sticky_dir", return_value=sticky_dir):
+            mgr = StickySettingsManager("test_submitter")
+
+        # Sticky farm should be used
+        assert mgr.get_effective_value("defaults.farm_id") == "sticky-farm-123"
+
+    def test_global_farm_change_does_not_affect_sticky(self, sticky_dir, mock_config_file):
+        """Changing global farm should not affect sticky farm."""
+        data = {
+            "defaults.farm_id": "sticky-farm-123",
+            "defaults.queue_id": "sticky-queue",
+        }
+        (sticky_dir / "test_submitter.json").write_text(json.dumps(data), encoding="utf-8")
+
+        def get_setting_side_effect(key, config=None):
+            if key == "defaults.farm_id":
+                return "global-farm-456"  # Different from sticky
+            return ""
+
+        mock_config_file.get_setting.side_effect = get_setting_side_effect
+
+        with patch.object(StickySettingsManager, "_get_sticky_dir", return_value=sticky_dir):
+            mgr = StickySettingsManager("test_submitter")
+
+        # Sticky farm should be preserved
+        assert mgr._settings["defaults.farm_id"] == "sticky-farm-123"
+        assert mgr.get_effective_value("defaults.farm_id") == "sticky-farm-123"
+
+    def test_farm_cascade_clears_downstream(self, sticky_dir, mock_config_file):
+        """Changing sticky farm should clear queue and storage profile."""
+        data = {
+            "defaults.farm_id": "old-farm",
+            "defaults.queue_id": "old-queue",
+            "settings.storage_profile_id": "old-sp",
+        }
+        (sticky_dir / "test_submitter.json").write_text(json.dumps(data), encoding="utf-8")
+
+        with patch.object(StickySettingsManager, "_get_sticky_dir", return_value=sticky_dir):
+            mgr = StickySettingsManager("test_submitter")
+            mgr.set_value("defaults.farm_id", "new-farm")
+            mgr.clear_downstream("defaults.farm_id")
+
+        # Queue and storage profile should be cleared
+        assert mgr._settings == {"defaults.farm_id": "new-farm"}
+
+    def test_global_queue_change_does_not_affect_sticky(self, sticky_dir, mock_config_file):
+        """Changing global queue should not affect sticky queue."""
+        # Create sticky file with queue
+        data = {
+            "defaults.farm_id": "farm-123",
+            "defaults.queue_id": "sticky-queue-abc",
+        }
+        (sticky_dir / "test_submitter.json").write_text(json.dumps(data), encoding="utf-8")
+
+        # Global queue is different
+        def get_setting_side_effect(key, config=None):
+            if key == "defaults.farm_id":
+                return "global-farm-456"
+            if key == "defaults.queue_id":
+                return "global-queue-xyz"  # Different from sticky
+            return ""
+
+        mock_config_file.get_setting.side_effect = get_setting_side_effect
+
+        with patch.object(StickySettingsManager, "_get_sticky_dir", return_value=sticky_dir):
+            mgr = StickySettingsManager("test_submitter")
+
+        # Sticky queue should be preserved, not overwritten by global
+        assert mgr._settings["defaults.queue_id"] == "sticky-queue-abc"
+        assert mgr.get_effective_value("defaults.queue_id") == "sticky-queue-abc"
+
+    def test_global_storage_profile_change_does_not_affect_sticky(
+        self, sticky_dir, mock_config_file
+    ):
+        """Changing global storage profile should not affect sticky storage profile."""
+        # Create sticky file with storage profile
+        data = {
+            "defaults.farm_id": "farm-123",
+            "defaults.queue_id": "queue-abc",
+            "settings.storage_profile_id": "sticky-sp-abc",
+        }
+        (sticky_dir / "test_submitter.json").write_text(json.dumps(data), encoding="utf-8")
+
+        # Global storage profile is different
+        def get_setting_side_effect(key, config=None):
+            if key == "defaults.farm_id":
+                return "global-farm-456"
+            if key == "settings.storage_profile_id":
+                return "global-sp-xyz"  # Different from sticky
+            return ""
+
+        mock_config_file.get_setting.side_effect = get_setting_side_effect
+
+        with patch.object(StickySettingsManager, "_get_sticky_dir", return_value=sticky_dir):
+            mgr = StickySettingsManager("test_submitter")
+
+        # Sticky storage profile should be preserved, not overwritten by global
+        assert mgr._settings["settings.storage_profile_id"] == "sticky-sp-abc"
+        assert mgr.get_effective_value("settings.storage_profile_id") == "sticky-sp-abc"

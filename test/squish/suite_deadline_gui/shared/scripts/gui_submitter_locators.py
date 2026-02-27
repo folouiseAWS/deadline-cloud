@@ -103,6 +103,13 @@ deadline_cloud_settings_storage_profile = {
     "unnamed": 1,
     "visible": 1,
 }
+# Farm combo box element (now in Job Settings, sticky per-submitter)
+deadline_cloud_settings_farm = {
+    "container": deadline_cloud_settings_widget,
+    "type": "DeadlineFarmListComboBox",
+    "unnamed": 1,
+    "visible": 1,
+}
 queue_environment_conda_widget = {
     "container": properties_only_widget,
     "name": "Queue Environment: Conda",

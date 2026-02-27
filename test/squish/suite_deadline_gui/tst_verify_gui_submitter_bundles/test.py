@@ -86,12 +86,24 @@ def main():
         "Expect storage profile combo box to be visible.",
     )
 
+    # verify farm combo box is present (now sticky per-submitter)
+    test.log("Verify farm combo box is present in Job Settings.")
+    test.compare(
+        squish.waitForObjectExists(gui_submitter_locators.deadline_cloud_settings_farm).visible,
+        True,
+        "Expect farm combo box to be visible.",
+    )
+
+    # verify farm shows correct value
+    gui_submitter_helpers.verify_submitter_farm(config.farm_name)
+
     # verify shared job settings tab for simple_ui_with_ja
     test.log(
         "Start verifying Shared Job Settings tab for Simple UI with Job Attachments (simple_ui_with_ja) job bundle"
     )
     gui_submitter_helpers.verify_shared_job_settings(
         config.simple_ui_with_ja_name,
+        farm_name=config.farm_name,
         queue_name=config.queue_name,
     )
 
@@ -116,6 +128,7 @@ def main():
     )
     gui_submitter_helpers.verify_shared_job_settings(
         config.simple_ui_no_ja_name,
+        farm_name=config.farm_name,
         queue_name=config.queue_name,
         storage_profile=config.storage_profile_macos,
     )

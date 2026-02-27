@@ -151,13 +151,17 @@ class TestProperty4CascadeInvariant:
     """
 
     @given(
+        farm_id=resource_id_st,
         queue_id=resource_id_st,
         sp_id=resource_id_st,
         clear_key=st.sampled_from(_CASCADE_ORDER),
     )
     @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
-    def test_cascade_invariant(self, queue_id, sp_id, clear_key, tmp_path, mock_config_file):
+    def test_cascade_invariant(
+        self, farm_id, queue_id, sp_id, clear_key, tmp_path, mock_config_file
+    ):
         mgr = _make_manager(tmp_path, mock_config_file)
+        mgr.set_value("defaults.farm_id", farm_id)
         mgr.set_value("defaults.queue_id", queue_id)
         mgr.set_value("settings.storage_profile_id", sp_id)
 

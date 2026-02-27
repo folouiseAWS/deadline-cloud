@@ -28,6 +28,7 @@ from ...config import config_file
 from .._utils import CancelationFlag, tr
 from .._sticky_settings import StickySettingsManager
 from ._resource_combo_boxes import (
+    DeadlineFarmListComboBox,
     DeadlineQueueListComboBox,
     DeadlineStorageProfileNameListComboBox,
 )
@@ -510,19 +511,28 @@ class DeadlineCloudSettingsWidget(QGroupBox):
 
     def _build_ui(self) -> None:
         """
-        Creates editable DeadlineQueueListComboBox
-        and DeadlineStorageProfileNameListComboBox with refresh buttons.
+        Creates editable combo boxes for farm, queue, and storage profile.
+        Farm is read-only if only one farm exists.
         """
+        self.farm_box_label = QLabel(tr("Farm"))
+        self.farm_box = DeadlineFarmListComboBox()
+        self.farm_box.box.currentIndexChanged.connect(self._on_farm_changed)
+        self.farm_box.background_exception.connect(self._handle_background_exception)
+        self.farm_box._list_update.connect(self._on_farm_list_updated)
+        self.layout.addRow(self.farm_box_label, self.farm_box)
+
         self.queue_box_label = QLabel(tr("Queue"))
         self.queue_box = DeadlineQueueListComboBox()
         self.queue_box.box.currentIndexChanged.connect(self._on_queue_changed)
         self.queue_box.background_exception.connect(self._handle_background_exception)
+        self.queue_box._list_update.connect(self._on_queue_list_updated)
         self.layout.addRow(self.queue_box_label, self.queue_box)
 
         self.storage_profile_box_label = QLabel(tr("Storage profile"))
         self.storage_profile_box = DeadlineStorageProfileNameListComboBox()
         self.storage_profile_box.box.currentIndexChanged.connect(self._on_storage_profile_changed)
         self.storage_profile_box.background_exception.connect(self._handle_background_exception)
+        self.storage_profile_box._list_update.connect(self._on_storage_profile_list_updated)
         self.layout.addRow(self.storage_profile_box_label, self.storage_profile_box)
 
         # Set initial config
@@ -531,6 +541,59 @@ class DeadlineCloudSettingsWidget(QGroupBox):
     def _handle_background_exception(self, title: str, e: BaseException) -> None:
         """Handles background thread exceptions from combo boxes."""
         logger.warning("Background exception in %s: %s", title, e)
+
+    def _on_farm_list_updated(self, refresh_id: int, items_list: list) -> None:
+        """
+        Called when farm list is loaded. Makes farm read-only if only one farm exists.
+        """
+        single_farm = len(items_list) == 1
+        self.farm_box.box.setEnabled(not single_farm)
+        self.farm_box.box.setToolTip("You have access to one farm." if single_farm else "")
+
+    def _on_queue_list_updated(self, refresh_id: int, items_list: list) -> None:
+        """
+        Called when queue list is loaded. Makes queue read-only if only one queue exists.
+        """
+        single_queue = len(items_list) == 1
+        self.queue_box.box.setEnabled(not single_queue)
+        self.queue_box.box.setToolTip("You have access to one queue." if single_queue else "")
+
+    def _on_storage_profile_list_updated(self, refresh_id: int, items_list: list) -> None:
+        """
+        Called when storage profile list is loaded. Makes read-only with "None" if empty.
+        """
+        # Check if only item is "<none selected>" with empty ID (meaning no real profiles)
+        has_profiles = any(item[1] for item in items_list)  # item[1] is the ID
+        if not has_profiles:
+            self.storage_profile_box.box.setEnabled(False)
+            self.storage_profile_box.box.setToolTip("No storage profiles available.")
+            # Replace "<none selected>" with "None"
+            if self.storage_profile_box.box.count() > 0:
+                self.storage_profile_box.box.setItemText(0, "None")
+        else:
+            self.storage_profile_box.box.setEnabled(True)
+            self.storage_profile_box.box.setToolTip("")
+
+    def _on_farm_changed(self, index: int) -> None:
+        """
+        Handles farm selection change. Updates sticky only (not global).
+        Clears downstream queue and storage profile.
+        """
+        if self._refreshing:
+            return
+        new_farm_id = self.farm_box.box.itemData(index) or ""
+        if not new_farm_id:
+            return
+
+        if self._sticky_mgr:
+            self._sticky_mgr.set_value("defaults.farm_id", new_farm_id)
+            self._sticky_mgr.clear_downstream("defaults.farm_id")
+
+        self._rebuild_override_config()
+        self.queue_box.refresh_list()
+        self.storage_profile_box.clear_list()
+        self.storage_profile_box.refresh_selected_id()
+        self.settings_changed.emit()
 
     def _maybe_set_global_default(self, setting_name: str, value: str) -> None:
         """
@@ -585,6 +648,7 @@ class DeadlineCloudSettingsWidget(QGroupBox):
         calls set_config() on each combo box.
         """
         self._override_config = self._build_override_config()
+        self.farm_box.set_config(self._override_config)
         self.queue_box.set_config(self._override_config)
         self.storage_profile_box.set_config(self._override_config)
 
@@ -614,17 +678,19 @@ class DeadlineCloudSettingsWidget(QGroupBox):
             self._rebuild_override_config()
 
             if deadline_authorized:
+                self.farm_box.refresh_list()
                 self.queue_box.refresh_list()
                 self.storage_profile_box.refresh_list()
             else:
+                self.farm_box.refresh_selected_id()
                 self.queue_box.refresh_selected_id()
                 self.storage_profile_box.refresh_selected_id()
         finally:
             self._refreshing = False
 
     def get_farm_id(self) -> str:
-        """Returns the farm ID from global config."""
-        return config_file.get_setting("defaults.farm_id")
+        """Returns the currently selected farm ID."""
+        return self.farm_box.box.currentData() or ""
 
     def get_queue_id(self) -> str:
         """Returns the currently selected queue ID."""

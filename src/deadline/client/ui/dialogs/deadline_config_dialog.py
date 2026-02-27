@@ -327,6 +327,7 @@ class DeadlineWorkstationConfigWidget(QWidget):
         default_farm_box_label = self.labels["defaults.farm_id"] = QLabel(tr("Default farm"))
         self.default_farm_box.box.currentIndexChanged.connect(self.default_farm_changed)
         self.default_farm_box.background_exception.connect(self.handle_background_exception)
+        self.default_farm_box._list_update.connect(self._on_farm_list_updated)
         layout.addRow(default_farm_box_label, self.default_farm_box)
 
     def _build_farm_settings_ui(self, group, layout):
@@ -336,6 +337,7 @@ class DeadlineWorkstationConfigWidget(QWidget):
         default_queue_box_label = self.labels["defaults.queue_id"] = QLabel(tr("Default queue"))
         self.default_queue_box.box.currentIndexChanged.connect(self.default_queue_changed)
         self.default_queue_box.background_exception.connect(self.handle_background_exception)
+        self.default_queue_box._list_update.connect(self._on_queue_list_updated)
         layout.addRow(default_queue_box_label, self.default_queue_box)
 
         self.default_storage_profile_box = DeadlineStorageProfileNameListComboBox(parent=group)
@@ -348,6 +350,7 @@ class DeadlineWorkstationConfigWidget(QWidget):
         self.default_storage_profile_box.background_exception.connect(
             self.handle_background_exception
         )
+        self.default_storage_profile_box._list_update.connect(self._on_storage_profile_list_updated)
         layout.addRow(default_storage_profile_box_label, self.default_storage_profile_box)
 
         item_name_copied = JobAttachmentsFileSystem.COPIED.value
@@ -697,6 +700,32 @@ class DeadlineWorkstationConfigWidget(QWidget):
 
     def handle_background_exception(self, title, e):
         QMessageBox.warning(self, title, f"Encountered an error:\n{e}")  # type: ignore[call-arg]
+
+    def _on_farm_list_updated(self, refresh_id: int, items_list: list) -> None:
+        """Makes farm read-only if only one farm exists."""
+        single_farm = len(items_list) == 1
+        self.default_farm_box.box.setEnabled(not single_farm)
+        self.default_farm_box.box.setToolTip("You have access to one farm." if single_farm else "")
+
+    def _on_queue_list_updated(self, refresh_id: int, items_list: list) -> None:
+        """Makes queue read-only if only one queue exists."""
+        single_queue = len(items_list) == 1
+        self.default_queue_box.box.setEnabled(not single_queue)
+        self.default_queue_box.box.setToolTip(
+            "You have access to one queue." if single_queue else ""
+        )
+
+    def _on_storage_profile_list_updated(self, refresh_id: int, items_list: list) -> None:
+        """Makes storage profile read-only with 'None' if no profiles available."""
+        has_profiles = any(item[1] for item in items_list)  # item[1] is the ID
+        if not has_profiles:
+            self.default_storage_profile_box.box.setEnabled(False)
+            self.default_storage_profile_box.box.setToolTip("No storage profiles available.")
+            if self.default_storage_profile_box.box.count() > 0:
+                self.default_storage_profile_box.box.setItemText(0, "None")
+        else:
+            self.default_storage_profile_box.box.setEnabled(True)
+            self.default_storage_profile_box.box.setToolTip("")
 
     def _fill_aws_profiles_box(self):
         # Use boto3 directly with no profile, so we don't get an error
